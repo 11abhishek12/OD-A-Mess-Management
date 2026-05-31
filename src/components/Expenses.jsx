@@ -101,12 +101,15 @@ export default function Expenses() {
       const usersSnap = await getDocs(collection(db, 'users'));
       const allUsers = [];
       const allMembers = [];
+      const usersMap = {};
       usersSnap.forEach(doc => {
         const u = { id: doc.id, ...doc.data() };
+        usersMap[u.uid] = u.name;
         allUsers.push(u);
         allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid });
         if (u.guests) {
           u.guests.forEach(g => {
+            usersMap[`${u.uid}_${g.id}`] = `${g.name} (Guest)`;
             allMembers.push({ type: 'guest', id: `${u.uid}_${g.id}`, name: `${g.name} (Guest)`, parentId: u.uid });
           });
         }

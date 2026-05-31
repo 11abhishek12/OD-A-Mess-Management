@@ -13,9 +13,11 @@ export default function Dashboard() {
   const [users, setUsers] = useState([]);
 
   const handleDateChange = (days) => {
-    const dateObj = new Date(currentDate);
-    dateObj.setDate(dateObj.getDate() + days);
-    setCurrentDate(dateObj.toISOString().split("T")[0]);
+    setCurrentDate(prev => {
+      const dateObj = new Date(prev);
+      dateObj.setDate(dateObj.getDate() + days);
+      return dateObj.toISOString().split("T")[0];
+    });
   };
   const [mealLogs, setMealLogs] = useState({});
   const [specialMealsInfo, setSpecialMealsInfo] = useState({});
