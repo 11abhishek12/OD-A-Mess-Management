@@ -85,7 +85,17 @@ export default function Expenses() {
       // Fetch users
       const usersSnap = await getDocs(collection(db, 'users'));
       const allUsers = [];
-      usersSnap.forEach(doc => allUsers.push({ id: doc.id, ...doc.data() }));
+      const allMembers = [];
+      usersSnap.forEach(doc => {
+        const u = { id: doc.id, ...doc.data() };
+        allUsers.push(u);
+        allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid });
+        if (u.guests) {
+          u.guests.forEach(g => {
+            allMembers.push({ type: 'guest', id: `${u.uid}_${g.id}`, name: `${g.name} (Guest)`, parentId: u.uid });
+          });
+        }
+      });
 
       // Fetch special meals
       const specialSnap = await getDocs(collection(db, 'specialMeals'));
@@ -110,7 +120,14 @@ export default function Expenses() {
         const d = doc.data();
         if (d.date.startsWith(currentMonthPrefix)) {
           if (!logsMatrix[d.userId]) logsMatrix[d.userId] = {};
-          logsMatrix[d.userId][d.date] = d.meals || [];
+          
+          if (Array.isArray(d.meals)) {
+            const obj = {};
+            d.meals.forEach(m => obj[m] = 'Standard');
+            logsMatrix[d.userId][d.date] = obj;
+          } else {
+            logsMatrix[d.userId][d.date] = d.meals || {};
+          }
         }
       });
 
@@ -139,14 +156,14 @@ export default function Expenses() {
       const mealInitials = ['B', 'L', 'D', 'O'];
 
       // Build Headers
-      allUsers.forEach(user => {
-        row1.push(user.name, '', '', '');
+      allMembers.forEach(member => {
+        row1.push(member.name, '', '', '');
         row2.push(...mealInitials);
       });
 
       // Daily Analytics Columns
-      const dailyAnalyticsCols = ['Total B', 'Total L', 'Total D', 'Total O', 'Total Special', 'Total Meals'];
-      row1.push('DAILY TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
+      const dailyAnalyticsCols = ['Units (B)', 'Units (L)', 'Units (D)', 'Units (O)', 'Units (Sp)', 'Total Units'];
+      row1.push('DAILY UNIT TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
       row2.push(...dailyAnalyticsCols);
 
       ws.addRow(row1);
@@ -154,11 +171,11 @@ export default function Expenses() {
 
       // Merge & Style User Headers
       let colIdx = 2;
-      allUsers.forEach(user => {
+      allMembers.forEach(member => {
         ws.mergeCells(1, colIdx, 1, colIdx + 3);
         const cell = ws.getCell(1, colIdx);
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: member.type === 'guest' ? 'FFFFE699' : 'FFD9E1F2' } };
         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         colIdx += 4;
       });
@@ -180,16 +197,17 @@ export default function Expenses() {
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         
-        if (i > 0 && i <= allUsers.length * 4) {
+        if (i > 0 && i <= allMembers.length * 4) {
            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
-        } else if (i > allUsers.length * 4) {
+        } else if (i > allMembers.length * 4) {
            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
         }
       });
 
       // Add Data Rows (Dates)
-      const userTotalsMatrix = {};
-      allUsers.forEach(u => userTotalsMatrix[u.uid] = { B:0, L:0, D:0, O:0, Sp:0, Total:0 });
+      const memberTotalsMatrix = {};
+      allMembers.forEach(m => memberTotalsMatrix[m.id] = { B:0, L:0, D:0, O:0, Sp:0, Units:0 });
+      let grandTotalUnits = 0;
 
       monthDates.forEach((date) => {
         const rowData = [];
@@ -201,28 +219,46 @@ export default function Expenses() {
         }
         rowData.push(hasSpecial ? `${date} 🌟` : date);
 
-        let dTB = 0, dTL = 0, dTD = 0, dTO = 0, dTSp = 0, dTTotal = 0;
+        let dTB = 0, dTL = 0, dTD = 0, dTO = 0, dTSp = 0, dTUnits = 0;
 
-        allUsers.forEach(user => {
-          const dayMeals = logsMatrix[user.uid]?.[date] || [];
+        allMembers.forEach(member => {
+          const dayMeals = logsMatrix[member.id]?.[date] || {};
           mealTypes.forEach((meal) => {
-            const isTaken = dayMeals.includes(meal);
-            const isSpecial = specialMealsData[date]?.[meal]?.isSpecial;
-            rowData.push(isTaken ? '✓' : '');
+            const selectedOption = dayMeals[meal];
+            const isTaken = !!selectedOption;
+            const spDayMeal = specialMealsData[date]?.[meal];
+            const isSpecial = spDayMeal?.isSpecial;
             
             if (isTaken) {
-              if (meal === 'Breakfast') { userTotalsMatrix[user.uid].B++; dTB++; }
-              if (meal === 'Lunch') { userTotalsMatrix[user.uid].L++; dTL++; }
-              if (meal === 'Dinner') { userTotalsMatrix[user.uid].D++; dTD++; }
-              if (meal === 'Others') { userTotalsMatrix[user.uid].O++; dTO++; }
-              if (isSpecial) { userTotalsMatrix[user.uid].Sp++; dTSp++; }
-              userTotalsMatrix[user.uid].Total++;
-              dTTotal++;
+              rowData.push(selectedOption === 'Standard' ? '✓' : selectedOption);
+
+              let mealUnits = (meal === 'Breakfast') ? 0.5 : 1.0;
+              
+              if (isSpecial && selectedOption !== 'Standard') {
+                const optInfo = spDayMeal.options?.find(o => o.name === selectedOption);
+                if (optInfo) mealUnits *= parseFloat(optInfo.factor);
+              }
+              
+              if (member.type === 'guest') {
+                mealUnits *= 1.3;
+              }
+
+              if (meal === 'Breakfast') { memberTotalsMatrix[member.id].B += mealUnits; dTB += mealUnits; }
+              if (meal === 'Lunch') { memberTotalsMatrix[member.id].L += mealUnits; dTL += mealUnits; }
+              if (meal === 'Dinner') { memberTotalsMatrix[member.id].D += mealUnits; dTD += mealUnits; }
+              if (meal === 'Others') { memberTotalsMatrix[member.id].O += mealUnits; dTO += mealUnits; }
+              if (isSpecial) { memberTotalsMatrix[member.id].Sp += mealUnits; dTSp += mealUnits; }
+              
+              memberTotalsMatrix[member.id].Units += mealUnits;
+              grandTotalUnits += mealUnits;
+              dTUnits += mealUnits;
+            } else {
+              rowData.push('');
             }
           });
         });
 
-        rowData.push(dTB, dTL, dTD, dTO, dTSp, dTTotal);
+        rowData.push(dTB, dTL, dTD, dTO, dTSp, dTUnits);
         const rowObj = ws.addRow(rowData);
 
         rowObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
@@ -232,16 +268,16 @@ export default function Expenses() {
           if (colNumber === 1) {
              cell.alignment = { horizontal: 'left', vertical: 'middle' };
              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hasSpecial ? 'FFFFD700' : 'FFF2F2F2' } };
-          } else if (colNumber > 1 && colNumber <= 1 + allUsers.length * 4) {
+          } else if (colNumber > 1 && colNumber <= 1 + allMembers.length * 4) {
              const mealIdx = (colNumber - 2) % 4;
              const isSpecial = specialMealsData[date]?.[mealTypes[mealIdx]]?.isSpecial;
              if (isSpecial) {
                  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
              }
-             if (cell.value === '✓') {
+             if (cell.value) {
                  cell.font = { color: { argb: isSpecial ? 'FFC00000' : 'FF00B050' }, bold: true };
              }
-          } else if (colNumber > 1 + allUsers.length * 4) {
+          } else if (colNumber > 1 + allMembers.length * 4) {
              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
           }
         });
@@ -249,29 +285,29 @@ export default function Expenses() {
 
       // Bottom User Analytics Rows
       const bottomLabels = [
-        { label: 'Total Breakfast', key: 'B' },
-        { label: 'Total Lunch', key: 'L' },
-        { label: 'Total Dinner', key: 'D' },
-        { label: 'Total Others', key: 'O' },
-        { label: 'Total Special', key: 'Sp' },
-        { label: 'TOTAL MEALS', key: 'Total' }
+        { label: 'Total Units (B)', key: 'B' },
+        { label: 'Total Units (L)', key: 'L' },
+        { label: 'Total Units (D)', key: 'D' },
+        { label: 'Total Units (O)', key: 'O' },
+        { label: 'Total Units (Sp)', key: 'Sp' },
+        { label: 'TOTAL UNITS', key: 'Units' }
       ];
 
       bottomLabels.forEach(({label, key}) => {
         const bRow = [label];
-        allUsers.forEach(user => {
-           bRow.push(userTotalsMatrix[user.uid][key], '', '', '');
+        allMembers.forEach(member => {
+           bRow.push(memberTotalsMatrix[member.id][key], '', '', '');
         });
         const rObj = ws.addRow(bRow);
         
         let cIdx = 2;
-        allUsers.forEach(() => {
+        allMembers.forEach(() => {
            ws.mergeCells(rObj.number, cIdx, rObj.number, cIdx + 3);
            cIdx += 4;
         });
 
         rObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-           if (colNumber === 1 || colNumber <= 1 + allUsers.length * 4) {
+           if (colNumber === 1 || colNumber <= 1 + allMembers.length * 4) {
              cell.font = { bold: true };
              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
              cell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -283,15 +319,15 @@ export default function Expenses() {
 
       // Narrow Columns
       ws.getColumn(1).width = 16;
-      for (let i = 2; i <= 1 + allUsers.length * 4; i++) {
+      for (let i = 2; i <= 1 + allMembers.length * 4; i++) {
         ws.getColumn(i).width = 4;
       }
-      for (let i = 2 + allUsers.length * 4; i <= 1 + allUsers.length * 4 + dailyAnalyticsCols.length; i++) {
-        ws.getColumn(i).width = 10;
+      for (let i = 2 + allMembers.length * 4; i <= 1 + allMembers.length * 4 + dailyAnalyticsCols.length; i++) {
+        ws.getColumn(i).width = 12;
       }
 
       // Add Expenses Sheet
-      const wsExp = wb.addWorksheet('Expenses', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+      const wsExp = wb.addWorksheet('Expenses & Billing', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
       wsExp.columns = [
         { header: 'Date', key: 'Date', width: 15 },
         { header: 'Member Name', key: 'UserName', width: 25 },
@@ -300,17 +336,15 @@ export default function Expenses() {
         { header: 'Description', key: 'Description', width: 40 }
       ];
       
-      // Style Expenses Header
       wsExp.getRow(1).eachCell({ includeEmpty: false }, cell => {
         if (cell.col <= 5) {
           cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } }; // Blue
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         }
       });
 
-      // Add Expenses Data
       expData.forEach(exp => {
         const row = wsExp.addRow(exp);
         row.getCell('Amount').numFmt = '₹#,##0.00';
@@ -325,49 +359,85 @@ export default function Expenses() {
         });
       });
 
-      // Add Member Summary on the Right
-      wsExp.getCell('G1').value = 'MEMBER SPENDING SUMMARY';
-      wsExp.mergeCells('G1:H1');
+      // Add Member Billing Summary on the Right
+      wsExp.getCell('G1').value = 'MEMBER BILLING SUMMARY';
+      wsExp.mergeCells('G1:L1');
       wsExp.getCell('G1').font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      wsExp.getCell('G1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF548235' } }; // Green
+      wsExp.getCell('G1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF548235' } };
       wsExp.getCell('G1').alignment = { horizontal: 'center', vertical: 'middle' };
-      wsExp.getCell('G1').border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
-      wsExp.getCell('G2').value = 'Member Name';
-      wsExp.getCell('H2').value = 'Total Spent (₹)';
-      wsExp.getRow(2).getCell('G').font = { bold: true };
-      wsExp.getRow(2).getCell('H').font = { bold: true };
-      wsExp.getRow(2).getCell('G').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      wsExp.getRow(2).getCell('H').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+      const summaryHeaders = ['Member Name', 'Self Units', 'Guest Units', 'Total Bill (₹)', 'Amount Paid (₹)', 'Balance (₹)'];
+      summaryHeaders.forEach((h, i) => {
+         const col = String.fromCharCode(71 + i); // G, H, I, J, K, L
+         wsExp.getCell(`${col}2`).value = h;
+         wsExp.getCell(`${col}2`).font = { bold: true };
+         wsExp.getCell(`${col}2`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+         wsExp.getCell(`${col}2`).alignment = { horizontal: 'center', vertical: 'middle' };
+         wsExp.getColumn(col).width = 18;
+      });
+      wsExp.getColumn('G').width = 25; // Member Name
+      
+      let baseRate = grandTotalUnits > 0 ? (monthlyTotal / grandTotalUnits) : 0;
       
       let rIdx = 3;
-      Object.entries(userTotals).forEach(([uid, total]) => {
-         wsExp.getCell(`G${rIdx}`).value = usersMap[uid] || 'Unknown';
-         wsExp.getCell(`H${rIdx}`).value = total;
-         wsExp.getCell(`H${rIdx}`).numFmt = '₹#,##0.00';
+      allUsers.forEach(user => {
+         let selfUnits = memberTotalsMatrix[user.uid].Units;
+         let guestUnits = 0;
+         if (user.guests) {
+            user.guests.forEach(g => {
+               guestUnits += memberTotalsMatrix[`${user.uid}_${g.id}`].Units;
+            });
+         }
+         let totalUnits = selfUnits + guestUnits;
+         let bill = totalUnits * baseRate;
+         let paid = userTotals[user.uid] || 0;
+         let balance = paid - bill; // Positive means they paid extra, negative means they owe
+
+         wsExp.getCell(`G${rIdx}`).value = user.name;
+         wsExp.getCell(`H${rIdx}`).value = selfUnits;
+         wsExp.getCell(`I${rIdx}`).value = guestUnits;
+         wsExp.getCell(`J${rIdx}`).value = bill;
+         wsExp.getCell(`K${rIdx}`).value = paid;
+         wsExp.getCell(`L${rIdx}`).value = balance;
+         
+         wsExp.getCell(`J${rIdx}`).numFmt = '₹#,##0.00';
+         wsExp.getCell(`K${rIdx}`).numFmt = '₹#,##0.00';
+         wsExp.getCell(`L${rIdx}`).numFmt = '₹#,##0.00';
+         
+         if (balance < 0) {
+            wsExp.getCell(`L${rIdx}`).font = { color: { argb: 'FFC00000' }, bold: true }; // Red for owing money
+         } else if (balance > 0) {
+            wsExp.getCell(`L${rIdx}`).font = { color: { argb: 'FF00B050' }, bold: true }; // Green for refund
+         }
          rIdx++;
       });
       
-      // Grand Total
+      // Grand Totals Row
       wsExp.getCell(`G${rIdx}`).value = 'GRAND TOTAL';
       wsExp.getCell(`G${rIdx}`).font = { bold: true };
       wsExp.getCell(`G${rIdx}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      wsExp.getCell(`H${rIdx}`).value = { formula: `SUM(H3:H${rIdx-1})` };
-      wsExp.getCell(`H${rIdx}`).font = { bold: true };
-      wsExp.getCell(`H${rIdx}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      wsExp.getCell(`H${rIdx}`).numFmt = '₹#,##0.00';
+      
+      ['H', 'I', 'J', 'K', 'L'].forEach(c => {
+         wsExp.getCell(`${c}${rIdx}`).value = { formula: `SUM(${c}3:${c}${rIdx-1})` };
+         wsExp.getCell(`${c}${rIdx}`).font = { bold: true };
+         wsExp.getCell(`${c}${rIdx}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+         if (['J', 'K', 'L'].includes(c)) wsExp.getCell(`${c}${rIdx}`).numFmt = '₹#,##0.00';
+      });
       
       // Style Summary Table Borders
       for(let r = 1; r <= rIdx; r++) {
-         ['G', 'H'].forEach(c => {
+         ['G', 'H', 'I', 'J', 'K', 'L'].forEach(c => {
              const cell = wsExp.getCell(`${c}${r}`);
              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
          });
       }
-      wsExp.getColumn('G').width = 25;
-      wsExp.getColumn('H').width = 20;
 
-      // Save file
+      // Metadata Info
+      wsExp.getCell(`N1`).value = `Base Cost Rate: ₹${baseRate.toFixed(2)} / Unit`;
+      wsExp.getCell(`N1`).font = { bold: true };
+      wsExp.getCell(`N2`).value = `Total Monthly Expenses: ₹${monthlyTotal.toFixed(2)}`;
+      wsExp.getCell(`N3`).value = `Grand Total Units: ${grandTotalUnits.toFixed(2)}`;
+      
       const buffer = await wb.xlsx.writeBuffer();
       saveAs(new Blob([buffer]), `Mess_Report_${currentMonthPrefix}.xlsx`);
 
@@ -385,7 +455,7 @@ export default function Expenses() {
         <h2>Expenses Log</h2>
         {isAdmin && (
           <button onClick={handleExport} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Download size={18} /> Export Report
+            <Download size={18} /> Export Billing Report
           </button>
         )}
       </div>
@@ -397,7 +467,7 @@ export default function Expenses() {
         </div>
         
         <div className="glass-panel fade-in" style={{ gridColumn: 'span 2' }}>
-           <h4 style={{ color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Spending by Member (Current Month)</h4>
+           <h4 style={{ color: 'var(--text-secondary)', marginBottom: '16px', textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '1px' }}>Amount Paid by Member (Current Month)</h4>
            <div style={{ display: 'flex', gap: '16px', overflowX: 'auto', paddingBottom: '8px' }}>
               {Object.entries(userTotals).map(([uid, total]) => (
                  <div key={uid} style={{ minWidth: '130px', padding: '16px', background: 'rgba(255,255,255,0.03)', borderRadius: '12px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.05)' }}>

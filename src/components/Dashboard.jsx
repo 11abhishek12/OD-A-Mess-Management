@@ -36,10 +36,34 @@ export default function Dashboard() {
       logs[data.userId] = data.meals;
     });
     
-    // Initialize default meals for those who haven't logged yet
+    // Normalize and Initialize default meals
     fetchedUsers.forEach(u => {
+      // Normalize Permanent Member logs
       if (!logs[u.uid]) {
-        logs[u.uid] = u.defaultMeals || [];
+        logs[u.uid] = {};
+        (u.defaultMeals || []).forEach(m => logs[u.uid][m] = 'Standard');
+      } else if (Array.isArray(logs[u.uid])) {
+        const newObj = {};
+        logs[u.uid].forEach(m => newObj[m] = 'Standard');
+        logs[u.uid] = newObj;
+      }
+
+      // Handle Attached Guests
+      if (u.guests) {
+        u.guests.forEach(g => {
+          const gKey = `${u.uid}_${g.id}`;
+          if (!logs[gKey]) {
+            logs[gKey] = {};
+            const isGuestActive = date <= g.endDate;
+            if (isGuestActive) {
+               (g.preferredMeals || []).forEach(m => logs[gKey][m] = 'Standard');
+            }
+          } else if (Array.isArray(logs[gKey])) {
+            const newObj = {};
+            logs[gKey].forEach(m => newObj[m] = 'Standard');
+            logs[gKey] = newObj;
+          }
+        });
       }
     });
     setMealLogs(logs);
@@ -53,27 +77,29 @@ export default function Dashboard() {
     }
   }
 
-  async function handleMealToggle(userId, mealType) {
+  async function handleMealChange(userId, mealType, value) {
     // Check permissions: only admin or the user themselves (if it's today) can edit
-    if (!isAdmin && (userId !== currentUser.uid || !isToday)) return;
+    // userId for guests looks like "userUid_guestId"
+    const ownerUid = userId.split('_')[0];
+    if (!isAdmin && (ownerUid !== currentUser.uid || !isToday)) return;
 
-    const currentMeals = mealLogs[userId] || [];
-    let newMeals;
-    if (currentMeals.includes(mealType)) {
-      newMeals = currentMeals.filter(m => m !== mealType);
+    const currentMeals = { ...(mealLogs[userId] || {}) };
+    
+    if (value === false) {
+      delete currentMeals[mealType];
     } else {
-      newMeals = [...currentMeals, mealType];
+      currentMeals[mealType] = value;
     }
 
     // Optimistic UI update
-    setMealLogs(prev => ({ ...prev, [userId]: newMeals }));
+    setMealLogs(prev => ({ ...prev, [userId]: currentMeals }));
 
     // Update Firestore
     const logId = `${currentDate}_${userId}`;
     await setDoc(doc(db, 'mealLogs', logId), {
       date: currentDate,
       userId: userId,
-      meals: newMeals
+      meals: currentMeals
     }, { merge: true });
   }
 
@@ -82,21 +108,23 @@ export default function Dashboard() {
     const isCurrentlySpecial = specialMealsInfo[meal]?.isSpecial;
     const isSpecial = !isCurrentlySpecial;
     
-    let description = "";
-    if (isSpecial) {
-      description = prompt(`Enter special ${meal} description (e.g. Chicken, Biryani):`);
-      if (description === null) return; // user cancelled
-    }
-    
     const newSpecialInfo = { ...specialMealsInfo };
     if (isSpecial) {
-      newSpecialInfo[meal] = { isSpecial: true, description };
+      newSpecialInfo[meal] = { 
+        isSpecial: true, 
+        options: [
+          { name: "Chicken", factor: 1.3 },
+          { name: "Mutton", factor: 2.5 },
+          { name: "Fish", factor: 1.3 },
+          { name: "Paneer", factor: 1.3 },
+          { name: "Other Special", factor: 1.5 }
+        ]
+      };
     } else {
       delete newSpecialInfo[meal];
     }
     
     setSpecialMealsInfo(newSpecialInfo);
-    
     await setDoc(doc(db, 'specialMeals', currentDate), newSpecialInfo);
   }
 
@@ -127,7 +155,7 @@ export default function Dashboard() {
             {Object.entries(specialMealsInfo).map(([meal, info]) => (
               info.isSpecial && (
                 <div key={meal} style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--accent-color)', fontSize: '0.9rem' }}>
-                  <strong style={{color: 'var(--accent-color)'}}>{meal}:</strong> {info.description}
+                  <strong style={{color: 'var(--accent-color)'}}>{meal} Special:</strong> Select custom options for members.
                 </div>
               )
             ))}
@@ -160,30 +188,74 @@ export default function Dashboard() {
           <tbody>
             {users.map(user => {
               const canEdit = isAdmin || (user.uid === currentUser.uid && isToday);
-              return (
-                <tr key={user.uid} className={user.uid === currentUser.uid ? 'current-user-row' : ''}>
-                  <td>
-                    {user.name} 
-                    {user.uid === currentUser.uid && <span style={{fontSize:'0.8rem', marginLeft:'8px', color:'var(--primary-color)'}}>(You)</span>}
+              
+              const renderRow = (id, name, roleBadge, isGuest) => (
+                <tr key={id} className={id === currentUser.uid ? 'current-user-row' : ''} style={isGuest ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}}>
+                  <td style={isGuest ? { paddingLeft: '32px', color: 'var(--text-secondary)' } : {}}>
+                    {isGuest ? '↳ ' : ''}{name}
+                    {id === currentUser.uid && <span style={{fontSize:'0.8rem', marginLeft:'8px', color:'var(--primary-color)'}}>(You)</span>}
                   </td>
                   <td>
-                    <span className="badge" style={{ background: user.role === 'guest' ? 'var(--warning-color)' : 'var(--primary-color)' }}>
-                      {user.role}
-                    </span>
+                    {roleBadge}
                   </td>
-                  {mealTypes.map(meal => (
-                    <td key={meal}>
-                      <input 
-                        type="checkbox" 
-                        className="custom-checkbox"
-                        checked={mealLogs[user.uid]?.includes(meal) || false}
-                        onChange={() => handleMealToggle(user.uid, meal)}
-                        disabled={!canEdit}
-                      />
-                    </td>
-                  ))}
+                  {mealTypes.map(meal => {
+                    const isSpecial = specialMealsInfo[meal]?.isSpecial;
+                    const selectedValue = mealLogs[id]?.[meal];
+                    const isTaken = !!selectedValue;
+
+                    return (
+                      <td key={`${id}-${meal}`}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <input 
+                            type="checkbox" 
+                            className="custom-checkbox"
+                            checked={isTaken}
+                            onChange={(e) => handleMealChange(id, meal, e.target.checked ? 'Standard' : false)}
+                            disabled={!canEdit}
+                          />
+                          {isSpecial && isTaken && (
+                            <select 
+                              value={selectedValue === 'Standard' ? '' : selectedValue} 
+                              onChange={(e) => handleMealChange(id, meal, e.target.value || 'Standard')}
+                              disabled={!canEdit}
+                              style={{ 
+                                background: 'rgba(0,0,0,0.3)', 
+                                color: 'white', 
+                                border: '1px solid var(--accent-color)', 
+                                borderRadius: '4px', 
+                                padding: '4px',
+                                fontSize: '0.8rem',
+                                marginTop: '4px',
+                                maxWidth: '100px'
+                              }}
+                            >
+                              <option value="">Standard Option</option>
+                              {specialMealsInfo[meal].options?.map(opt => (
+                                <option key={opt.name} value={opt.name}>{opt.name} ({opt.factor}x)</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
-              )
+              );
+
+              const rows = [renderRow(user.uid, user.name, <span className="badge" style={{ background: user.role === 'guest' ? 'var(--warning-color)' : 'var(--primary-color)' }}>{user.role}</span>, false)];
+              
+              if (user.guests) {
+                user.guests.forEach(g => {
+                  const isActive = currentDate <= g.endDate;
+                  const hasLogs = mealLogs[`${user.uid}_${g.id}`] && Object.keys(mealLogs[`${user.uid}_${g.id}`]).length > 0;
+                  
+                  if (isActive || hasLogs) {
+                    rows.push(renderRow(`${user.uid}_${g.id}`, g.name, <span className="badge" style={{ background: 'var(--warning-color)' }}>Guest</span>, true));
+                  }
+                });
+              }
+
+              return <React.Fragment key={user.uid}>{rows}</React.Fragment>;
             })}
           </tbody>
         </table>
