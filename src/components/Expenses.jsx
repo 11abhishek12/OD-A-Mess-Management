@@ -162,6 +162,7 @@ export default function Expenses() {
       
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet('Attendance Report', { views: [{ state: 'frozen', xSplit: 1, ySplit: 2 }] });
+      ws.properties.defaultRowHeight = 25;
 
       const row1 = [''];
       const row2 = ['Date'];
@@ -190,8 +191,11 @@ export default function Expenses() {
       row1.push('DAILY TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
       row2.push(...dailyAnalyticsCols);
 
-      ws.addRow(row1);
-      ws.addRow(row2);
+      const headerRow1 = ws.addRow(row1);
+      const headerRow2 = ws.addRow(row2);
+      
+      headerRow1.height = 30;
+      headerRow2.height = 30;
 
       // Merge & Style User Headers
       let colIdx = 2;
@@ -372,6 +376,7 @@ export default function Expenses() {
         }
 
         const rObj = ws.addRow(bRow);
+        rObj.height = 25;
         
         let cIdx = 2;
         allMembers.forEach(() => {
@@ -391,16 +396,17 @@ export default function Expenses() {
       });
 
       // Narrow Columns
-      ws.getColumn(1).width = 16;
+      ws.getColumn(1).width = 18;
       for (let i = 2; i <= 1 + allMembers.length * 4; i++) {
-        ws.getColumn(i).width = 4;
+        ws.getColumn(i).width = 6;
       }
       for (let i = 2 + allMembers.length * 4; i <= 1 + allMembers.length * 4 + dailyAnalyticsCols.length; i++) {
-        ws.getColumn(i).width = 12;
+        ws.getColumn(i).width = 16;
       }
 
       // Add Expenses Sheet
       const wsExp = wb.addWorksheet('Expenses & Billing', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+      wsExp.properties.defaultRowHeight = 25;
       wsExp.columns = [
         { header: 'Date', key: 'Date', width: 15 },
         { header: 'Member Name', key: 'UserName', width: 25 },
@@ -409,9 +415,10 @@ export default function Expenses() {
         { header: 'Description', key: 'Description', width: 40 }
       ];
       
+      wsExp.getRow(1).height = 30;
       wsExp.getRow(1).eachCell({ includeEmpty: false }, cell => {
         if (cell.col <= 5) {
-          cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 };
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4472C4' } };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };

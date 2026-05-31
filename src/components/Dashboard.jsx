@@ -6,6 +6,10 @@ import { Calendar, Info, Edit2 } from 'lucide-react';
 
 export default function Dashboard() {
   const { currentUser, userProfile } = useAuth();
+  const [specialMealModal, setSpecialMealModal] = useState(null);
+  const [specialSelection, setSpecialSelection] = useState("Chicken");
+  const [customFactor, setCustomFactor] = useState("1.5");
+  const [customName, setCustomName] = useState("");
   const [users, setUsers] = useState([]);
   const [mealLogs, setMealLogs] = useState({});
   const [specialMealsInfo, setSpecialMealsInfo] = useState({});
@@ -105,52 +109,78 @@ export default function Dashboard() {
 
   async function handleSpecialMealToggle(meal) {
     if (!isAdmin) return;
-    const isCurrentlySpecial = specialMealsInfo[meal]?.isSpecial;
-    const isSpecial = !isCurrentlySpecial;
+    const isSpecial = !specialMealsInfo[meal]?.isSpecial;
     
-    const newSpecialInfo = { ...specialMealsInfo };
     if (isSpecial) {
-      const defaultName = prompt(`Enter DEFAULT Special Item for ${meal} (e.g. Mutton):`, "Mutton");
-      if (!defaultName) return;
-      const defaultFactorStr = prompt(`Enter Factor for ${defaultName} (e.g. 2.5):`, "2.5");
-      if (!defaultFactorStr) return;
-      const defaultFactor = parseFloat(defaultFactorStr);
-
-      newSpecialInfo[meal] = { 
-        isSpecial: true, 
-        options: [
-          { name: defaultName, factor: defaultFactor },
-          { name: "Chicken", factor: 1.3 },
-          { name: "Fish", factor: 1.3 },
-          { name: "Paneer", factor: 1.3 }
-        ]
-      };
-
-      // Auto-update standard consumers
-      const newLogs = { ...mealLogs };
-      const promises = [];
-      Object.keys(newLogs).forEach(id => {
-        if (newLogs[id][meal] === 'Standard') {
-          newLogs[id] = { ...newLogs[id], [meal]: defaultName };
-          promises.push(
-            setDoc(doc(db, 'mealLogs', `${currentDate}_${id}`), {
-              date: currentDate, userId: id, meals: newLogs[id]
-            }, { merge: true })
-          );
-        }
-      });
-      setMealLogs(newLogs);
-      if (promises.length > 0) {
-        await Promise.all(promises);
-      }
-
+      setSpecialSelection("Chicken");
+      setCustomFactor("1.5");
+      setCustomName("");
+      setSpecialMealModal({ meal });
     } else {
+      const newSpecialInfo = { ...specialMealsInfo };
       delete newSpecialInfo[meal];
+      setSpecialMealsInfo(newSpecialInfo);
+      await setDoc(doc(db, 'specialMeals', currentDate), newSpecialInfo);
     }
+  }
+
+  const handleConfirmSpecial = async () => {
+    if (!specialMealModal) return;
+    const { meal } = specialMealModal;
     
+    let defaultName = specialSelection;
+    let defaultFactor = 1.3;
+    
+    if (specialSelection === 'Chicken') defaultFactor = 1.3;
+    else if (specialSelection === 'Mutton') defaultFactor = 2.5;
+    else if (specialSelection === 'Fish') defaultFactor = 1.3;
+    else if (specialSelection === 'Paneer') defaultFactor = 1.3;
+    else if (specialSelection === 'Others') {
+       defaultName = customName || 'Special';
+       defaultFactor = parseFloat(customFactor) || 1.0;
+    }
+
+    const newSpecialInfo = { ...specialMealsInfo };
+    // Create base options list without duplicates
+    const baseOptions = [
+      { name: "Chicken", factor: 1.3 },
+      { name: "Mutton", factor: 2.5 },
+      { name: "Fish", factor: 1.3 },
+      { name: "Paneer", factor: 1.3 }
+    ];
+    
+    // Add custom option if it's not in the base list
+    if (specialSelection === 'Others') {
+       baseOptions.unshift({ name: defaultName, factor: defaultFactor });
+    }
+
+    newSpecialInfo[meal] = { 
+      isSpecial: true, 
+      options: baseOptions
+    };
+
+    // Auto-update standard consumers
+    const newLogs = { ...mealLogs };
+    const promises = [];
+    Object.keys(newLogs).forEach(id => {
+      if (newLogs[id][meal] === 'Standard') {
+        newLogs[id] = { ...newLogs[id], [meal]: defaultName };
+        promises.push(
+          setDoc(doc(db, 'mealLogs', `${currentDate}_${id}`), {
+            date: currentDate, userId: id, meals: newLogs[id]
+          }, { merge: true })
+        );
+      }
+    });
+    setMealLogs(newLogs);
+    if (promises.length > 0) {
+      await Promise.all(promises);
+    }
+
     setSpecialMealsInfo(newSpecialInfo);
     await setDoc(doc(db, 'specialMeals', currentDate), newSpecialInfo);
-  }
+    setSpecialMealModal(null);
+  };
 
   async function handleAddCustomOption(meal) {
     if (!isAdmin) return;
@@ -170,6 +200,60 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      {specialMealModal && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+          <div className="glass-panel fade-in" style={{ padding: '24px', width: '350px', background: 'var(--surface-color)', borderRadius: '12px', border: '1px solid var(--accent-color)' }}>
+            <h3 style={{ marginTop: 0, color: 'var(--accent-color)' }}>Declare {specialMealModal.meal} Special</h3>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Choose a default meal option. Members marked as "Standard" will instantly be assigned this item.</p>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Default Item</label>
+              <select 
+                value={specialSelection}
+                onChange={(e) => setSpecialSelection(e.target.value)}
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
+              >
+                <option value="Chicken">Chicken (Factor: 1.3)</option>
+                <option value="Mutton">Mutton (Factor: 2.5)</option>
+                <option value="Fish">Fish (Factor: 1.3)</option>
+                <option value="Paneer">Paneer (Factor: 1.3)</option>
+                <option value="Others">Others (Custom Factor)</option>
+              </select>
+            </div>
+
+            {specialSelection === 'Others' && (
+              <div style={{ marginBottom: '16px', display: 'flex', gap: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.85rem' }}>Name</label>
+                  <input 
+                    type="text" 
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="e.g. Veg Biryani"
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
+                  />
+                </div>
+                <div style={{ width: '80px' }}>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.85rem' }}>Factor</label>
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    value={customFactor}
+                    onChange={(e) => setCustomFactor(e.target.value)}
+                    style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button className="btn-secondary" onClick={() => setSpecialMealModal(null)}>Cancel</button>
+              <button className="btn-primary" onClick={handleConfirmSpecial}>Confirm Special</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="header-actions">
         <h2>Meal Logs</h2>
         <div className="date-picker glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
