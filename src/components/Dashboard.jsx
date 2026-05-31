@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-import { Calendar, Info, Edit2 } from 'lucide-react';
+import { Calendar, Info, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function Dashboard() {
   const { currentUser, userProfile } = useAuth();
@@ -11,6 +11,12 @@ export default function Dashboard() {
   const [customFactor, setCustomFactor] = useState("1.5");
   const [customName, setCustomName] = useState("");
   const [users, setUsers] = useState([]);
+
+  const handleDateChange = (days) => {
+    const dateObj = new Date(currentDate);
+    dateObj.setDate(dateObj.getDate() + days);
+    setCurrentDate(dateObj.toISOString().split("T")[0]);
+  };
   const [mealLogs, setMealLogs] = useState({});
   const [specialMealsInfo, setSpecialMealsInfo] = useState({});
   
@@ -256,14 +262,22 @@ export default function Dashboard() {
 
       <div className="header-actions">
         <h2>Meal Logs</h2>
-        <div className="date-picker glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Calendar size={18} />
-          <input 
-            type="date" 
-            value={currentDate} 
-            onChange={(e) => setCurrentDate(e.target.value)} 
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
-          />
+        <div className="date-picker glass-panel" style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button onClick={() => handleDateChange(-1)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}>
+            <ChevronLeft size={20} />
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Calendar size={18} />
+            <input 
+              type="date" 
+              value={currentDate} 
+              onChange={(e) => setCurrentDate(e.target.value)} 
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
+            />
+          </div>
+          <button onClick={() => handleDateChange(1)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}>
+            <ChevronRight size={20} />
+          </button>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import { collection, query, orderBy, getDocs, addDoc, Timestamp, doc, updateDoc 
 import { Download, PlusCircle, Trash2 } from 'lucide-react';
 
 export default function Expenses() {
+  const [exportMonth, setExportMonth] = useState(new Date().toISOString().substring(0, 7));
   const { currentUser, userProfile } = useAuth();
   const [expenses, setExpenses] = useState([]);
   const [amount, setAmount] = useState('');
@@ -94,7 +95,7 @@ export default function Expenses() {
   async function handleExport() {
     try {
       setLoading(true);
-      const currentMonthPrefix = new Date().toISOString().substring(0, 7);
+      const currentMonthPrefix = exportMonth;
 
       // Fetch users
       const usersSnap = await getDocs(collection(db, 'users'));
@@ -124,7 +125,8 @@ export default function Expenses() {
       const logsSnapshot = await getDocs(collection(db, 'mealLogs'));
       const logsMatrix = {};
       
-      const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+      const [year, month] = currentMonthPrefix.split('-');
+      const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
       const monthDates = Array.from({length: daysInMonth}, (_, i) => {
         const d = String(i + 1).padStart(2, '0');
         return `${currentMonthPrefix}-${d}`;
@@ -549,13 +551,23 @@ export default function Expenses() {
 
   return (
     <div className="expenses">
-      <div className="header-actions">
-        <h2>Expenses Log</h2>
-        {isAdmin && (
-          <button onClick={handleExport} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Download size={18} /> Export Billing Report
-          </button>
-        )}
+      <div className="glass-panel fade-in">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2>Month Expenses</h2>
+          {isAdmin && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <input 
+                type="month" 
+                value={exportMonth} 
+                onChange={(e) => setExportMonth(e.target.value)} 
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--accent-color)', color: 'var(--text-primary)', padding: '8px', borderRadius: '8px' }}
+              />
+              <button className="btn-primary" onClick={handleExport} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Download size={16} /> {loading ? 'Exporting...' : 'Export Excel'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '24px', marginBottom: '24px' }}>
