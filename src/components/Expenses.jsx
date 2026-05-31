@@ -175,9 +175,19 @@ export default function Expenses() {
         row2.push(...mealInitials);
       });
 
+      const colLetter = (col) => {
+        let letter = '';
+        while (col > 0) {
+          let temp = (col - 1) % 26;
+          letter = String.fromCharCode(temp + 65) + letter;
+          col = (col - temp - 1) / 26;
+        }
+        return letter;
+      };
+
       // Daily Analytics Columns
-      const dailyAnalyticsCols = ['Units (B)', 'Units (L)', 'Units (D)', 'Units (O)', 'Units (Sp)', 'Total Units'];
-      row1.push('DAILY UNIT TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
+      const dailyAnalyticsCols = ['Count (B)', 'Count (L)', 'Count (D)', 'Count (O)', 'Total Weighted Units'];
+      row1.push('DAILY TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
       row2.push(...dailyAnalyticsCols);
 
       ws.addRow(row1);
@@ -219,12 +229,9 @@ export default function Expenses() {
       });
 
       // Add Data Rows (Dates)
-      const memberTotalsMatrix = {};
-      allMembers.forEach(m => memberTotalsMatrix[m.id] = { B:0, L:0, D:0, O:0, Sp:0, Units:0 });
-      let grandTotalUnits = 0;
-
-      monthDates.forEach((date) => {
+      monthDates.forEach((date, dateIdx) => {
         const rowData = [];
+        const r = dateIdx + 3; // Excel row index
         
         const spDay = specialMealsData[date];
         let hasSpecial = false;
@@ -233,46 +240,55 @@ export default function Expenses() {
         }
         rowData.push(hasSpecial ? `${date} 🌟` : date);
 
-        let dTB = 0, dTL = 0, dTD = 0, dTO = 0, dTSp = 0, dTUnits = 0;
-
         allMembers.forEach(member => {
           const dayMeals = logsMatrix[member.id]?.[date] || {};
           mealTypes.forEach((meal) => {
             const selectedOption = dayMeals[meal];
-            const isTaken = !!selectedOption;
-            const spDayMeal = specialMealsData[date]?.[meal];
-            const isSpecial = spDayMeal?.isSpecial;
-            
-            if (isTaken) {
+            if (selectedOption) {
               rowData.push(selectedOption === 'Standard' ? '✓' : selectedOption);
-
-              let mealUnits = (meal === 'Breakfast') ? 0.5 : 1.0;
-              
-              if (isSpecial && selectedOption !== 'Standard') {
-                const optInfo = spDayMeal.options?.find(o => o.name === selectedOption);
-                if (optInfo) mealUnits *= parseFloat(optInfo.factor);
-              }
-              
-              if (member.type === 'guest') {
-                mealUnits *= 1.3;
-              }
-
-              if (meal === 'Breakfast') { memberTotalsMatrix[member.id].B += mealUnits; dTB += mealUnits; }
-              if (meal === 'Lunch') { memberTotalsMatrix[member.id].L += mealUnits; dTL += mealUnits; }
-              if (meal === 'Dinner') { memberTotalsMatrix[member.id].D += mealUnits; dTD += mealUnits; }
-              if (meal === 'Others') { memberTotalsMatrix[member.id].O += mealUnits; dTO += mealUnits; }
-              if (isSpecial) { memberTotalsMatrix[member.id].Sp += mealUnits; dTSp += mealUnits; }
-              
-              memberTotalsMatrix[member.id].Units += mealUnits;
-              grandTotalUnits += mealUnits;
-              dTUnits += mealUnits;
             } else {
-              rowData.push('');
+              rowData.push('-');
             }
           });
         });
 
-        rowData.push(dTB, dTL, dTD, dTO, dTSp, dTUnits);
+        const counts = { B: [], L: [], D: [], O: [] };
+        const unitTerms = [];
+
+        allMembers.forEach((member, mIdx) => {
+          mealTypes.forEach((meal, mealIdx) => {
+             const colName = colLetter(2 + mIdx*4 + mealIdx);
+             if (mealIdx === 0) counts.B.push(`IF(${colName}${r}="-", 0, 1)`);
+             if (mealIdx === 1) counts.L.push(`IF(${colName}${r}="-", 0, 1)`);
+             if (mealIdx === 2) counts.D.push(`IF(${colName}${r}="-", 0, 1)`);
+             if (mealIdx === 3) counts.O.push(`IF(${colName}${r}="-", 0, 1)`);
+
+             const spDayMeal = specialMealsData[date]?.[meal];
+             let factorFormula = `IF(${colName}${r}="-", 0, 1.0)`;
+             if (meal === 'Breakfast') {
+               factorFormula = `IF(${colName}${r}="-", 0, 0.5)`;
+             } else if (spDayMeal?.isSpecial) {
+               let nested = `IF(${colName}${r}="-", 0, IF(${colName}${r}="✓", 1.0, `;
+               const options = spDayMeal.options || [];
+               options.forEach(opt => {
+                  nested += `IF(${colName}${r}="${opt.name}", ${opt.factor}, `;
+               });
+               nested += `0`; // fallback
+               nested += ')'.repeat(options.length + 2);
+               factorFormula = nested;
+             }
+             if (member.type === 'guest') factorFormula = `(${factorFormula})*1.3`;
+             unitTerms.push(factorFormula);
+          });
+        });
+
+        rowData.push(
+          { formula: counts.B.join('+') || '0' },
+          { formula: counts.L.join('+') || '0' },
+          { formula: counts.D.join('+') || '0' },
+          { formula: counts.O.join('+') || '0' },
+          { formula: unitTerms.join('+') || '0' }
+        );
         const rowObj = ws.addRow(rowData);
 
         rowObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
@@ -299,19 +315,62 @@ export default function Expenses() {
 
       // Bottom User Analytics Rows
       const bottomLabels = [
-        { label: 'Total Units (B)', key: 'B' },
-        { label: 'Total Units (L)', key: 'L' },
-        { label: 'Total Units (D)', key: 'D' },
-        { label: 'Total Units (O)', key: 'O' },
-        { label: 'Total Units (Sp)', key: 'Sp' },
-        { label: 'TOTAL UNITS', key: 'Units' }
+        { label: 'Total Count (B)', mIdxOffset: 0 },
+        { label: 'Total Count (L)', mIdxOffset: 1 },
+        { label: 'Total Count (D)', mIdxOffset: 2 },
+        { label: 'Total Count (O)', mIdxOffset: 3 },
+        { label: 'TOTAL UNITS', isUnits: true }
       ];
 
-      bottomLabels.forEach(({label, key}) => {
-        const bRow = [label];
-        allMembers.forEach(member => {
-           bRow.push(memberTotalsMatrix[member.id][key], '', '', '');
+      const rOffset = monthDates.length + 2; // last data row index
+      const totalUnitsRowIdx = rOffset + 5; // TOTAL UNITS row will be the 5th bottom row
+
+      bottomLabels.forEach((info) => {
+        const bRow = [info.label];
+        allMembers.forEach((member, mIdx) => {
+           if (info.isUnits) {
+              const terms = [];
+              for (let d = 0; d < monthDates.length; d++) {
+                 const r = d + 3;
+                 for (let mealIdx=0; mealIdx<4; mealIdx++) {
+                     const meal = mealTypes[mealIdx];
+                     const colName = colLetter(2 + mIdx*4 + mealIdx);
+                     const spDayMeal = specialMealsData[monthDates[d]]?.[meal];
+                     let factorFormula = `IF(${colName}${r}="-", 0, 1.0)`;
+                     if (meal === 'Breakfast') {
+                        factorFormula = `IF(${colName}${r}="-", 0, 0.5)`;
+                     } else if (spDayMeal?.isSpecial) {
+                        let nested = `IF(${colName}${r}="-", 0, IF(${colName}${r}="✓", 1.0, `;
+                        const options = spDayMeal.options || [];
+                        options.forEach(opt => {
+                           nested += `IF(${colName}${r}="${opt.name}", ${opt.factor}, `;
+                        });
+                        nested += `0`; // fallback
+                        nested += ')'.repeat(options.length + 2);
+                        factorFormula = nested;
+                     }
+                     if (member.type === 'guest') factorFormula = `(${factorFormula})*1.3`;
+                     terms.push(factorFormula);
+                 }
+              }
+              bRow.push({ formula: terms.join('+') || '0' }, '', '', '');
+           } else {
+              const colName = colLetter(2 + mIdx*4 + info.mIdxOffset);
+              bRow.push({ formula: `COUNTIF(${colName}3:${colName}${rOffset}, "<>-")` }, '', '', '');
+           }
         });
+        
+        // Grand totals for daily count columns
+        if (info.isUnits) {
+           const sumCol = colLetter(2 + allMembers.length*4 + 4); 
+           bRow.push('', '', '', '', { formula: `SUM(${sumCol}3:${sumCol}${rOffset})` });
+        } else {
+           const sumCol = colLetter(2 + allMembers.length*4 + info.mIdxOffset);
+           const arr = ['', '', '', '', ''];
+           arr[info.mIdxOffset] = { formula: `SUM(${sumCol}3:${sumCol}${rOffset})` };
+           bRow.push(...arr);
+        }
+
         const rObj = ws.addRow(bRow);
         
         let cIdx = 2;
@@ -391,38 +450,61 @@ export default function Expenses() {
       });
       wsExp.getColumn('G').width = 25; // Member Name
       
-      let baseRate = grandTotalUnits > 0 ? (monthlyTotal / grandTotalUnits) : 0;
+      const lastExpRow = expData.length + 1;
+      const totalExpCell = `C${lastExpRow + 2}`;
+      wsExp.getCell(`B${lastExpRow + 2}`).value = 'Total Expenses';
+      wsExp.getCell(`B${lastExpRow + 2}`).font = { bold: true };
+      wsExp.getCell(totalExpCell).value = { formula: `SUM(C2:C${lastExpRow})` };
+      wsExp.getCell(totalExpCell).font = { bold: true };
+      wsExp.getCell(totalExpCell).numFmt = '₹#,##0.00';
+
+      // Base Rate Formula
+      const grandTotalCol = colLetter(2 + allMembers.length*4 + 4);
+      wsExp.getCell(`N1`).value = 'Base Cost Rate:';
+      wsExp.getCell(`O1`).value = { formula: `${totalExpCell} / 'Attendance Report'!${grandTotalCol}${totalUnitsRowIdx}` };
+      wsExp.getCell(`O1`).numFmt = '₹#,##0.00';
       
       let rIdx = 3;
       allUsers.forEach(user => {
-         let selfUnits = memberTotalsMatrix[user.uid].Units;
-         let guestUnits = 0;
-         if (user.guests) {
-            user.guests.forEach(g => {
-               guestUnits += memberTotalsMatrix[`${user.uid}_${g.id}`].Units;
-            });
-         }
-         let totalUnits = selfUnits + guestUnits;
-         let bill = totalUnits * baseRate;
-         let paid = userTotals[user.uid] || 0;
-         let balance = paid - bill; // Positive means they paid extra, negative means they owe
+         const memberIdx = allMembers.findIndex(m => m.id === user.uid);
+         const selfUnitsCol = colLetter(2 + memberIdx*4);
 
          wsExp.getCell(`G${rIdx}`).value = user.name;
-         wsExp.getCell(`H${rIdx}`).value = selfUnits;
-         wsExp.getCell(`I${rIdx}`).value = guestUnits;
-         wsExp.getCell(`J${rIdx}`).value = bill;
+         wsExp.getCell(`H${rIdx}`).value = { formula: `'Attendance Report'!${selfUnitsCol}${totalUnitsRowIdx}` };
+         
+         if (user.guests && user.guests.length > 0) {
+            let guestFormula = '';
+            user.guests.forEach(g => {
+               const gIdx = allMembers.findIndex(m => m.id === `${user.uid}_${g.id}`);
+               const gCol = colLetter(2 + gIdx*4);
+               guestFormula += `'Attendance Report'!${gCol}${totalUnitsRowIdx}+`;
+            });
+            guestFormula = guestFormula.slice(0, -1);
+            wsExp.getCell(`I${rIdx}`).value = { formula: guestFormula || '0' };
+         } else {
+            wsExp.getCell(`I${rIdx}`).value = 0;
+         }
+
+         let paid = userTotals[user.uid] || 0;
+
+         wsExp.getCell(`J${rIdx}`).value = { formula: `(H${rIdx}+I${rIdx})*$O$1` };
          wsExp.getCell(`K${rIdx}`).value = paid;
-         wsExp.getCell(`L${rIdx}`).value = balance;
+         wsExp.getCell(`L${rIdx}`).value = { formula: `K${rIdx}-J${rIdx}` };
          
          wsExp.getCell(`J${rIdx}`).numFmt = '₹#,##0.00';
          wsExp.getCell(`K${rIdx}`).numFmt = '₹#,##0.00';
          wsExp.getCell(`L${rIdx}`).numFmt = '₹#,##0.00';
          
-         if (balance < 0) {
-            wsExp.getCell(`L${rIdx}`).font = { color: { argb: 'FFC00000' }, bold: true }; // Red for owing money
-         } else if (balance > 0) {
-            wsExp.getCell(`L${rIdx}`).font = { color: { argb: 'FF00B050' }, bold: true }; // Green for refund
-         }
+         // Conditional formatting is best done natively in Excel, but we'll apply a default static style here
+         // For a fully dynamic color change, we'd add conditional formatting rules via exceljs
+         wsExp.addConditionalFormatting({
+           ref: `L${rIdx}:L${rIdx}`,
+           rules: [
+             { type: 'cellIs', operator: 'lessThan', formulae: ['0'], style: { font: { color: { argb: 'FFC00000' }, bold: true } } },
+             { type: 'cellIs', operator: 'greaterThan', formulae: ['0'], style: { font: { color: { argb: 'FF00B050' }, bold: true } } }
+           ]
+         });
+
          rIdx++;
       });
       
@@ -430,7 +512,6 @@ export default function Expenses() {
       wsExp.getCell(`G${rIdx}`).value = 'GRAND TOTAL';
       wsExp.getCell(`G${rIdx}`).font = { bold: true };
       wsExp.getCell(`G${rIdx}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      
       ['H', 'I', 'J', 'K', 'L'].forEach(c => {
          wsExp.getCell(`${c}${rIdx}`).value = { formula: `SUM(${c}3:${c}${rIdx-1})` };
          wsExp.getCell(`${c}${rIdx}`).font = { bold: true };
@@ -445,12 +526,8 @@ export default function Expenses() {
              cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
          });
       }
-
-      // Metadata Info
-      wsExp.getCell(`N1`).value = `Base Cost Rate: ₹${baseRate.toFixed(2)} / Unit`;
       wsExp.getCell(`N1`).font = { bold: true };
-      wsExp.getCell(`N2`).value = `Total Monthly Expenses: ₹${monthlyTotal.toFixed(2)}`;
-      wsExp.getCell(`N3`).value = `Grand Total Units: ${grandTotalUnits.toFixed(2)}`;
+      wsExp.getCell(`O1`).font = { bold: true };
       
       const buffer = await wb.xlsx.writeBuffer();
       saveAs(new Blob([buffer]), `Mess_Report_${currentMonthPrefix}.xlsx`);
