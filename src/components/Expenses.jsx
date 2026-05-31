@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
-import { collection, query, orderBy, getDocs, addDoc, Timestamp } from 'firebase/firestore';
-import { Download, PlusCircle } from 'lucide-react';
+import { collection, query, orderBy, getDocs, addDoc, Timestamp, doc, updateDoc } from 'firebase/firestore';
+import { Download, PlusCircle, Trash2 } from 'lucide-react';
 
 export default function Expenses() {
   const { currentUser, userProfile } = useAuth();
@@ -22,7 +22,7 @@ export default function Expenses() {
     let total = 0;
     const uTotals = {};
     expenses.forEach(exp => {
-      if (exp.date.startsWith(currentMonthPrefix)) {
+      if (exp.date.startsWith(currentMonthPrefix) && !exp.isDeleted) {
         total += exp.amount;
         uTotals[exp.userId] = (uTotals[exp.userId] || 0) + exp.amount;
       }
@@ -75,6 +75,20 @@ export default function Expenses() {
     setType('regular');
     setLoading(false);
     fetchExpenses();
+  }
+
+  async function handleDeleteExpense(id) {
+    if (!isAdmin) return;
+    if (!window.confirm("Are you sure you want to delete this expense? It will be crossed out and removed from all calculations.")) return;
+    setLoading(true);
+    try {
+      await updateDoc(doc(db, 'expenses', id), { isDeleted: true });
+      fetchExpenses();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete expense.');
+    }
+    setLoading(false);
   }
 
   async function handleExport() {
@@ -133,7 +147,7 @@ export default function Expenses() {
 
       // Fetch Expenses
       const expData = expenses
-        .filter(e => e.date.startsWith(currentMonthPrefix))
+        .filter(e => e.date.startsWith(currentMonthPrefix) && !e.isDeleted)
         .map(e => ({
           Date: e.date,
           UserName: usersMap[e.userId] || e.userId,
@@ -513,25 +527,35 @@ export default function Expenses() {
               <th>Type</th>
               <th>Description</th>
               <th>Amount (₹)</th>
+              {isAdmin && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {expenses.map(exp => (
-              <tr key={exp.id}>
-                <td>{exp.date}</td>
-                <td>{usersMap[exp.userId] || 'Unknown'}</td>
-                <td>
+              <tr key={exp.id} style={{ opacity: exp.isDeleted ? 0.5 : 1 }}>
+                <td style={{ textDecoration: exp.isDeleted ? 'line-through' : 'none' }}>{exp.date}</td>
+                <td style={{ textDecoration: exp.isDeleted ? 'line-through' : 'none' }}>{usersMap[exp.userId] || 'Unknown'}</td>
+                <td style={{ textDecoration: exp.isDeleted ? 'line-through' : 'none' }}>
                   <span className="badge" style={{ background: exp.type === 'special' ? 'var(--warning-color)' : 'var(--accent-color)' }}>
                     {exp.type}
                   </span>
                 </td>
-                <td>{exp.description}</td>
-                <td><strong>{exp.amount.toFixed(2)}</strong></td>
+                <td style={{ textDecoration: exp.isDeleted ? 'line-through' : 'none' }}>{exp.description} {exp.isDeleted && <span style={{color:'var(--danger-color)', fontSize:'0.8rem', fontWeight:'bold'}}>(DELETED)</span>}</td>
+                <td style={{ textDecoration: exp.isDeleted ? 'line-through' : 'none' }}><strong>{exp.amount.toFixed(2)}</strong></td>
+                {isAdmin && (
+                  <td>
+                    {!exp.isDeleted && (
+                      <button className="btn-icon" onClick={() => handleDeleteExpense(exp.id)} style={{ color: 'var(--danger-color)', background: 'transparent' }} title="Delete Expense">
+                        <Trash2 size={18} />
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
             {expenses.length === 0 && (
               <tr>
-                <td colSpan="5" style={{ textAlign: 'center', padding: '24px' }}>No expenses logged yet.</td>
+                <td colSpan={isAdmin ? "6" : "5"} style={{ textAlign: 'center', padding: '24px' }}>No expenses logged yet.</td>
               </tr>
             )}
           </tbody>

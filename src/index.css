@@ -285,3 +285,35 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   accent-color: var(--primary-color);
 }
 
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .header-actions {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .navbar {
+    flex-direction: column;
+    gap: 16px;
+    margin: 8px;
+    padding: 12px;
+  }
+  .nav-links {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .nav-user {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .expenses form {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .table-container {
+    -webkit-overflow-scrolling: touch;
+  }
+  .btn-primary, .btn-secondary {
+    width: 100%;
+  }
+}

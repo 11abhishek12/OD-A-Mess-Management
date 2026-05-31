@@ -23,6 +23,7 @@ export default function Roster() {
 
   const [usersMap, setUsersMap] = useState({});
   const [sequence, setSequence] = useState([]);
+  const [excluded, setExcluded] = useState([]);
   
   const [startDate, setStartDate] = useState(getLocalDateStr(new Date()));
   const [loading, setLoading] = useState(true);
@@ -52,10 +53,14 @@ export default function Roster() {
         const docSnap = await getDoc(doc(db, 'settings', 'shoppingRoster'));
         if (docSnap.exists()) {
           const data = docSnap.data();
-          setSequence(data.sequence && data.sequence.length > 0 ? data.sequence : allUids);
+          const existingSequence = data.sequence && data.sequence.length > 0 ? data.sequence : allUids;
+          const missingUids = allUids.filter(uid => !existingSequence.includes(uid));
+          setSequence([...existingSequence, ...missingUids]);
+          setExcluded(data.excluded || []);
           if (data.startDate) setStartDate(data.startDate);
         } else {
           setSequence(allUids);
+          setExcluded([]);
         }
       } catch (err) {
         console.error("Error fetching roster data:", err);
@@ -87,6 +92,7 @@ export default function Roster() {
     try {
       await setDoc(doc(db, 'settings', 'shoppingRoster'), {
         sequence,
+        excluded,
         startDate
       });
       setMessage('Roster configuration saved!');
@@ -100,7 +106,9 @@ export default function Roster() {
 
   // Generate Schedule for Next 7 Days
   const schedule = [];
-  if (sequence.length > 0 && startDate && viewDate) {
+  const activeSequence = sequence.filter(uid => !excluded.includes(uid));
+  
+  if (activeSequence.length > 0 && startDate && viewDate) {
     // Parse startDate components to avoid UTC shift
     const [sYr, sMo, sDa] = startDate.split('-').map(Number);
     const start = new Date(sYr, sMo - 1, sDa);
@@ -117,7 +125,7 @@ export default function Roster() {
       const diffTime = targetDate.getTime() - start.getTime();
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
       
-      const seqLen = sequence.length;
+      const seqLen = activeSequence.length;
       let slotsPassed = Math.floor(diffDays / 2);
       
       let seqIndex = slotsPassed % seqLen;
@@ -126,7 +134,7 @@ export default function Roster() {
       schedule.push({
         date: getLocalDateStr(targetDate),
         displayDate: targetDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-        shopperId: sequence[seqIndex]
+        shopperId: activeSequence[seqIndex]
       });
     }
   }
@@ -163,20 +171,41 @@ export default function Roster() {
             <div style={{ flex: '2', minWidth: '300px' }}>
               <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)', fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '1px' }}>Shopper Sequence</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(0,0,0,0.15)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.02)' }}>
-                {sequence.map((uid, idx) => (
-                  <div key={uid} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: '4px solid var(--primary-color)', transition: 'background 0.2s' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        {idx + 1}
+                {sequence.map((uid, idx) => {
+                  const isExcluded = excluded.includes(uid);
+                  return (
+                    <div key={uid} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', padding: '12px 16px', background: isExcluded ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.05)', borderRadius: '8px', borderLeft: isExcluded ? '4px solid #555' : '4px solid var(--primary-color)', transition: 'background 0.2s', opacity: isExcluded ? 0.6 : 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          {idx + 1}
+                        </div>
+                        <strong style={{ fontSize: '1.05rem', color: 'var(--text-primary)', textDecoration: isExcluded ? 'line-through' : 'none' }}>{usersMap[uid] || 'Unknown User'}</strong>
                       </div>
-                      <strong style={{ fontSize: '1.05rem', color: 'var(--text-primary)' }}>{usersMap[uid] || 'Unknown User'}</strong>
+                      
+                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                          <input 
+                            type="checkbox" 
+                            className="custom-checkbox" 
+                            checked={isExcluded} 
+                            onChange={() => {
+                              if (isExcluded) {
+                                setExcluded(excluded.filter(e => e !== uid));
+                              } else {
+                                setExcluded([...excluded, uid]);
+                              }
+                            }} 
+                          />
+                          Exclude
+                        </label>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button className="btn-icon" onClick={() => moveUp(idx)} disabled={idx === 0} style={{ padding: '6px', background: idx === 0 ? 'transparent' : 'rgba(255,255,255,0.05)' }}><ArrowUp size={16} /></button>
+                          <button className="btn-icon" onClick={() => moveDown(idx)} disabled={idx === sequence.length - 1} style={{ padding: '6px', background: idx === sequence.length - 1 ? 'transparent' : 'rgba(255,255,255,0.05)' }}><ArrowDown size={16} /></button>
+                        </div>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button className="btn-icon" onClick={() => moveUp(idx)} disabled={idx === 0} style={{ padding: '6px', background: idx === 0 ? 'transparent' : 'rgba(255,255,255,0.05)' }}><ArrowUp size={16} /></button>
-                      <button className="btn-icon" onClick={() => moveDown(idx)} disabled={idx === sequence.length - 1} style={{ padding: '6px', background: idx === sequence.length - 1 ? 'transparent' : 'rgba(255,255,255,0.05)' }}><ArrowDown size={16} /></button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>

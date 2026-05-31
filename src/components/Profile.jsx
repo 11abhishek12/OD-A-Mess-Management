@@ -74,6 +74,7 @@ export default function Profile() {
 
   const [guestName, setGuestName] = useState('');
   const [guestMeals, setGuestMeals] = useState([]);
+  const [guestStartDate, setGuestStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [guestEndDate, setGuestEndDate] = useState(new Date().toISOString().split('T')[0]);
 
   const handleToggleGuestMeal = (meal) => {
@@ -85,7 +86,7 @@ export default function Profile() {
   };
 
   const handleAddGuest = async () => {
-    if (!guestName || guestMeals.length === 0 || !guestEndDate) {
+    if (!guestName || guestMeals.length === 0 || !guestEndDate || !guestStartDate) {
       setMessage('Please fill all guest fields and select at least one meal.');
       return;
     }
@@ -93,6 +94,7 @@ export default function Profile() {
       id: 'g_' + Date.now(),
       name: guestName,
       preferredMeals: guestMeals,
+      startDate: guestStartDate,
       endDate: guestEndDate
     };
     const newGuestsList = [...guests, newGuest];
@@ -224,7 +226,7 @@ export default function Profile() {
                 <div>
                   <strong style={{ fontSize: '1.1rem', color: 'var(--text-primary)' }}>{guest.name}</strong>
                   <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '4px' }}>
-                    Meals: {guest.preferredMeals.join(', ')} | Till: {guest.endDate}
+                    Meals: {guest.preferredMeals.join(', ')} | From: {guest.startDate || 'N/A'} Till: {guest.endDate}
                   </div>
                 </div>
                 <button className="btn-icon" onClick={() => handleRemoveGuest(guest.id)} style={{ color: 'var(--danger-color)', background: 'transparent' }}>
@@ -240,7 +242,11 @@ export default function Profile() {
             <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Guest Name</label>
             <input type="text" value={guestName} onChange={e => setGuestName(e.target.value)} placeholder="e.g. Brother" style={{ width: '100%', padding: '10px' }} />
           </div>
-          <div style={{ flex: '1', minWidth: '150px' }}>
+          <div style={{ flex: '1', minWidth: '130px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>Start Date</label>
+            <input type="date" value={guestStartDate} onChange={e => setGuestStartDate(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white' }} />
+          </div>
+          <div style={{ flex: '1', minWidth: '130px' }}>
             <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>End Date</label>
             <input type="date" value={guestEndDate} onChange={e => setGuestEndDate(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(0,0,0,0.3)', color: 'white' }} />
           </div>

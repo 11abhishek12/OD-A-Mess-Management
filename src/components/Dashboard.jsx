@@ -54,7 +54,7 @@ export default function Dashboard() {
           const gKey = `${u.uid}_${g.id}`;
           if (!logs[gKey]) {
             logs[gKey] = {};
-            const isGuestActive = date <= g.endDate;
+            const isGuestActive = date <= g.endDate && date >= (g.startDate || '2000-01-01');
             if (isGuestActive) {
                (g.preferredMeals || []).forEach(m => logs[gKey][m] = 'Standard');
             }
@@ -110,20 +110,58 @@ export default function Dashboard() {
     
     const newSpecialInfo = { ...specialMealsInfo };
     if (isSpecial) {
+      const defaultName = prompt(`Enter DEFAULT Special Item for ${meal} (e.g. Mutton):`, "Mutton");
+      if (!defaultName) return;
+      const defaultFactorStr = prompt(`Enter Factor for ${defaultName} (e.g. 2.5):`, "2.5");
+      if (!defaultFactorStr) return;
+      const defaultFactor = parseFloat(defaultFactorStr);
+
       newSpecialInfo[meal] = { 
         isSpecial: true, 
         options: [
+          { name: defaultName, factor: defaultFactor },
           { name: "Chicken", factor: 1.3 },
-          { name: "Mutton", factor: 2.5 },
           { name: "Fish", factor: 1.3 },
-          { name: "Paneer", factor: 1.3 },
-          { name: "Other Special", factor: 1.5 }
+          { name: "Paneer", factor: 1.3 }
         ]
       };
+
+      // Auto-update standard consumers
+      const newLogs = { ...mealLogs };
+      const promises = [];
+      Object.keys(newLogs).forEach(id => {
+        if (newLogs[id][meal] === 'Standard') {
+          newLogs[id] = { ...newLogs[id], [meal]: defaultName };
+          promises.push(
+            setDoc(doc(db, 'mealLogs', `${currentDate}_${id}`), {
+              date: currentDate, userId: id, meals: newLogs[id]
+            }, { merge: true })
+          );
+        }
+      });
+      setMealLogs(newLogs);
+      if (promises.length > 0) {
+        await Promise.all(promises);
+      }
+
     } else {
       delete newSpecialInfo[meal];
     }
     
+    setSpecialMealsInfo(newSpecialInfo);
+    await setDoc(doc(db, 'specialMeals', currentDate), newSpecialInfo);
+  }
+
+  async function handleAddCustomOption(meal) {
+    if (!isAdmin) return;
+    const optName = prompt(`Enter Custom Option Name for ${meal}:`);
+    if (!optName) return;
+    const optFactorStr = prompt(`Enter Factor for ${optName} (e.g. 1.8):`, "1.5");
+    if (!optFactorStr) return;
+    const optFactor = parseFloat(optFactorStr);
+
+    const newSpecialInfo = { ...specialMealsInfo };
+    newSpecialInfo[meal].options.push({ name: optName, factor: optFactor });
     setSpecialMealsInfo(newSpecialInfo);
     await setDoc(doc(db, 'specialMeals', currentDate), newSpecialInfo);
   }
@@ -154,8 +192,13 @@ export default function Dashboard() {
           <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
             {Object.entries(specialMealsInfo).map(([meal, info]) => (
               info.isSpecial && (
-                <div key={meal} style={{ background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--accent-color)', fontSize: '0.9rem' }}>
-                  <strong style={{color: 'var(--accent-color)'}}>{meal} Special:</strong> Select custom options for members.
+                <div key={meal} style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'rgba(255,255,255,0.05)', color: 'var(--text-primary)', padding: '8px 16px', borderRadius: '8px', border: '1px solid var(--accent-color)', fontSize: '0.9rem' }}>
+                  <span><strong style={{color: 'var(--accent-color)'}}>{meal} Special:</strong> Select custom options for members.</span>
+                  {isAdmin && (
+                    <button className="btn-secondary" onClick={() => handleAddCustomOption(meal)} style={{ padding: '4px 8px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Edit2 size={12} /> Add Custom Option
+                    </button>
+                  )}
                 </div>
               )
             ))}
@@ -246,7 +289,7 @@ export default function Dashboard() {
               
               if (user.guests) {
                 user.guests.forEach(g => {
-                  const isActive = currentDate <= g.endDate;
+                  const isActive = currentDate <= g.endDate && currentDate >= (g.startDate || '2000-01-01');
                   const hasLogs = mealLogs[`${user.uid}_${g.id}`] && Object.keys(mealLogs[`${user.uid}_${g.id}`]).length > 0;
                   
                   if (isActive || hasLogs) {
