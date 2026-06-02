@@ -24,6 +24,7 @@ export default function Dashboard() {
   
   // Format YYYY-MM-DD
   const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isLocked, setIsLocked] = useState(false);
 
   const isAdmin = userProfile?.role === 'admin';
   const isToday = currentDate === new Date().toISOString().split('T')[0];
@@ -87,13 +88,30 @@ export default function Dashboard() {
     } else {
       setSpecialMealsInfo({});
     }
+
+    // 4. Fetch lock status
+    const lockDoc = await getDoc(doc(db, 'lockedDates', date));
+    setIsLocked(lockDoc.exists() ? lockDoc.data().locked : false);
+  }
+
+  async function handleToggleLock() {
+    if (!isAdmin) return;
+    const newStatus = !isLocked;
+    setIsLocked(newStatus);
+    await setDoc(doc(db, 'lockedDates', currentDate), { locked: newStatus });
   }
 
   async function handleMealChange(userId, mealType, value) {
-    // Check permissions: only admin or the user themselves (if it's today) can edit
+    if (isLocked) {
+      alert("This date is locked for editing. An admin must unlock it first.");
+      return;
+    }
+
+    // Check permissions: only admin or the user themselves (if future or today) can edit
     // userId for guests looks like "userUid_guestId"
     const ownerUid = userId.split('_')[0];
-    if (!isAdmin && (ownerUid !== currentUser.uid || !isToday)) return;
+    const isFutureOrToday = currentDate >= new Date().toISOString().split('T')[0];
+    if (!isAdmin && (ownerUid !== currentUser.uid || !isFutureOrToday)) return;
 
     const currentMeals = { ...(mealLogs[userId] || {}) };
     
@@ -281,6 +299,15 @@ export default function Dashboard() {
             <ChevronRight size={20} />
           </button>
         </div>
+        {isAdmin && (
+          <button 
+            onClick={handleToggleLock} 
+            className="btn-secondary" 
+            style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: isLocked ? 'var(--warning-color)' : 'var(--text-secondary)', borderColor: isLocked ? 'var(--warning-color)' : '' }}
+          >
+            {isLocked ? '🔒 Unlock Date' : '🔓 Lock Date'}
+          </button>
+        )}
       </div>
 
       {Object.keys(specialMealsInfo).length > 0 && (
@@ -330,7 +357,8 @@ export default function Dashboard() {
           </thead>
           <tbody>
             {users.map(user => {
-              const canEdit = isAdmin || (user.uid === currentUser.uid && isToday);
+              const isFutureOrToday = currentDate >= new Date().toISOString().split('T')[0];
+              const canEdit = !isLocked && (isAdmin || (user.uid === currentUser.uid && isFutureOrToday));
               
               const renderRow = (id, name, roleBadge, isGuest) => (
                 <tr key={id} className={id === currentUser.uid ? 'current-user-row' : ''} style={isGuest ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}}>

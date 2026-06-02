@@ -11,6 +11,7 @@ export default function Expenses() {
   const [amount, setAmount] = useState('');
   const [type, setType] = useState('regular');
   const [description, setDescription] = useState('');
+  const [expenseUserId, setExpenseUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [usersMap, setUsersMap] = useState({});
   const [monthlyTotal, setMonthlyTotal] = useState(0);
@@ -63,7 +64,7 @@ export default function Expenses() {
 
     setLoading(true);
     await addDoc(collection(db, 'expenses'), {
-      userId: currentUser.uid,
+      userId: expenseUserId || currentUser.uid,
       amount: parseFloat(amount),
       type,
       description,
@@ -595,8 +596,18 @@ export default function Expenses() {
 
       <div className="glass-panel" style={{ marginBottom: '24px' }}>
         <h3>Add Expense</h3>
-        <form onSubmit={handleAddExpense} style={{ display: 'flex', gap: '16px', alignItems: 'flex-end', marginTop: '16px', flexWrap: 'wrap' }}>
-          <div style={{ flex: '1', minWidth: '150px' }}>
+        <form onSubmit={handleAddExpense} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          {isAdmin && (
+            <div style={{ flex: '1', minWidth: '150px' }}>
+              <label>Member</label>
+              <select value={expenseUserId || currentUser.uid} onChange={(e) => setExpenseUserId(e.target.value)}>
+                {Object.entries(usersMap).map(([uid, name]) => (
+                  <option key={uid} value={uid}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div style={{ flex: '1', minWidth: '120px' }}>
             <label>Amount</label>
             <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
           </div>
