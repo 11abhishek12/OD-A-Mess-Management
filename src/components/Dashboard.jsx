@@ -142,16 +142,23 @@ export default function Dashboard() {
       currentMeals[mealType] = value;
     }
 
-    // Optimistic UI update
-    setMealLogs(prev => ({ ...prev, [userId]: currentMeals }));
+    try {
+      // Optimistic UI update
+      setMealLogs(prev => ({ ...prev, [userId]: currentMeals }));
 
-    // Update Firestore
-    const logId = `${currentDate}_${userId}`;
-    await setDoc(doc(db, 'mealLogs', logId), {
-      date: currentDate,
-      userId: userId,
-      meals: currentMeals
-    }, { merge: true });
+      // Update Firestore
+      const logId = `${currentDate}_${userId}`;
+      await setDoc(doc(db, 'mealLogs', logId), {
+        date: currentDate,
+        userId: userId,
+        meals: currentMeals
+      });
+    } catch (error) {
+      console.error("Firestore Error:", error);
+      alert("Failed to save changes: " + error.message + "\n\nThis is usually caused by database security rules preventing edits to past dates.");
+      // Revert UI by re-fetching
+      fetchDashboardData(currentDate);
+    }
   }
 
   async function handleSpecialMealToggle(meal) {

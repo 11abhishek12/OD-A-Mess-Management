@@ -107,11 +107,11 @@ export default function Expenses() {
         const u = { id: doc.id, ...doc.data() };
         usersMap[u.uid] = u.name;
         allUsers.push(u);
-        allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid });
+        allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid, defaultMeals: u.defaultMeals || [] });
         if (u.guests) {
           u.guests.forEach(g => {
             usersMap[`${u.uid}_${g.id}`] = `${g.name} (Guest)`;
-            allMembers.push({ type: 'guest', id: `${u.uid}_${g.id}`, name: `${g.name} (Guest)`, parentId: u.uid });
+            allMembers.push({ type: 'guest', id: `${u.uid}_${g.id}`, name: `${g.name} (Guest)`, parentId: u.uid, startDate: g.startDate, endDate: g.endDate, preferredMeals: g.preferredMeals || [] });
           });
         }
       });
@@ -251,7 +251,22 @@ export default function Expenses() {
         rowData.push(hasSpecial ? `${date} 🌟` : date);
 
         allMembers.forEach(member => {
-          const dayMeals = logsMatrix[member.id]?.[date] || {};
+          let dayMeals;
+          if (logsMatrix[member.id] && logsMatrix[member.id][date] !== undefined) {
+            dayMeals = logsMatrix[member.id][date];
+          } else {
+            // Fallback if no log exists
+            dayMeals = {};
+            if (member.type === 'permanent') {
+              member.defaultMeals.forEach(m => dayMeals[m] = 'Standard');
+            } else if (member.type === 'guest') {
+              const isGuestActive = date <= member.endDate && date >= (member.startDate || '2000-01-01');
+              if (isGuestActive) {
+                member.preferredMeals.forEach(m => dayMeals[m] = 'Standard');
+              }
+            }
+          }
+
           mealTypes.forEach((meal) => {
             const selectedOption = dayMeals[meal];
             if (selectedOption) {
