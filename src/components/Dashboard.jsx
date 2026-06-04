@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-import { Calendar, Info, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Info, Edit2, ChevronLeft, ChevronRight, ArrowUp, ArrowDown } from 'lucide-react';
 
 export default function Dashboard() {
   const { currentUser, userProfile } = useAuth();
@@ -38,6 +38,7 @@ export default function Dashboard() {
     const usersSnapshot = await getDocs(collection(db, 'users'));
     const fetchedUsers = [];
     usersSnapshot.forEach(doc => fetchedUsers.push(doc.data()));
+    fetchedUsers.sort((a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999));
     setUsers(fetchedUsers);
 
     // 2. Fetch meal logs for the date
@@ -99,6 +100,26 @@ export default function Dashboard() {
     const newStatus = !isLocked;
     setIsLocked(newStatus);
     await setDoc(doc(db, 'lockedDates', currentDate), { locked: newStatus });
+  }
+
+  async function moveUser(index, direction) {
+    if (!isAdmin) return;
+    if (direction === -1 && index === 0) return;
+    if (direction === 1 && index === users.length - 1) return;
+
+    const newUsers = [...users];
+    const temp = newUsers[index];
+    newUsers[index] = newUsers[index + direction];
+    newUsers[index + direction] = temp;
+
+    // re-assign sequential displayOrder to all to maintain pure sorted order
+    const updates = newUsers.map((u, i) => {
+      u.displayOrder = i;
+      return updateDoc(doc(db, 'users', u.uid), { displayOrder: i });
+    });
+    
+    setUsers(newUsers);
+    await Promise.all(updates);
   }
 
   async function handleMealChange(userId, mealType, value) {
@@ -356,15 +377,29 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {users.map(user => {
+            {users.map((user, index) => {
               const isFutureOrToday = currentDate >= new Date().toISOString().split('T')[0];
               const canEdit = !isLocked && (isAdmin || (user.uid === currentUser.uid && isFutureOrToday));
               
-              const renderRow = (id, name, roleBadge, isGuest) => (
+              const renderRow = (id, name, roleBadge, isGuest, userIndex) => (
                 <tr key={id} className={id === currentUser.uid ? 'current-user-row' : ''} style={isGuest ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}}>
                   <td style={isGuest ? { paddingLeft: '32px', color: 'var(--text-secondary)' } : {}}>
-                    {isGuest ? '↳ ' : ''}{name}
-                    {id === currentUser.uid && <span style={{fontSize:'0.8rem', marginLeft:'8px', color:'var(--primary-color)'}}>(You)</span>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {!isGuest && isAdmin && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <button onClick={() => moveUser(userIndex, -1)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0, opacity: userIndex === 0 ? 0.2 : 1 }} disabled={userIndex === 0}>
+                            <ArrowUp size={14} />
+                          </button>
+                          <button onClick={() => moveUser(userIndex, 1)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0, opacity: userIndex === users.length - 1 ? 0.2 : 1 }} disabled={userIndex === users.length - 1}>
+                            <ArrowDown size={14} />
+                          </button>
+                        </div>
+                      )}
+                      <div>
+                        {isGuest ? '↳ ' : ''}{name}
+                        {id === currentUser.uid && <span style={{fontSize:'0.8rem', marginLeft:'8px', color:'var(--primary-color)'}}>(You)</span>}
+                      </div>
+                    </div>
                   </td>
                   <td>
                     {roleBadge}
@@ -413,7 +448,7 @@ export default function Dashboard() {
                 </tr>
               );
 
-              const rows = [renderRow(user.uid, user.name, <span className="badge" style={{ background: user.role === 'guest' ? 'var(--warning-color)' : 'var(--primary-color)' }}>{user.role}</span>, false)];
+              const rows = [renderRow(user.uid, user.name, <span className="badge" style={{ background: user.role === 'guest' ? 'var(--warning-color)' : 'var(--primary-color)' }}>{user.role}</span>, false, index)];
               
               if (user.guests) {
                 user.guests.forEach(g => {
@@ -421,7 +456,7 @@ export default function Dashboard() {
                   const hasLogs = mealLogs[`${user.uid}_${g.id}`] && Object.keys(mealLogs[`${user.uid}_${g.id}`]).length > 0;
                   
                   if (isActive || hasLogs) {
-                    rows.push(renderRow(`${user.uid}_${g.id}`, g.name, <span className="badge" style={{ background: 'var(--warning-color)' }}>Guest</span>, true));
+                    rows.push(renderRow(`${user.uid}_${g.id}`, g.name, <span className="badge" style={{ background: 'var(--warning-color)' }}>Guest</span>, true, index));
                   }
                 });
               }
