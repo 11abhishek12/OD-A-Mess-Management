@@ -183,12 +183,12 @@ export default function Dashboard() {
     const { meal } = specialMealModal;
     
     let defaultName = specialSelection;
-    let defaultFactor = 1.3;
+    let defaultFactor = 1.5;
     
-    if (specialSelection === 'Chicken') defaultFactor = 1.3;
+    if (specialSelection === 'Chicken') defaultFactor = 1.5;
     else if (specialSelection === 'Mutton') defaultFactor = 2.5;
-    else if (specialSelection === 'Fish') defaultFactor = 1.3;
-    else if (specialSelection === 'Paneer') defaultFactor = 1.3;
+    else if (specialSelection === 'Fish') defaultFactor = 1.5;
+    else if (specialSelection === 'Paneer') defaultFactor = 1.5;
     else if (specialSelection === 'Others') {
        defaultName = customName || 'Special';
        defaultFactor = parseFloat(customFactor) || 1.0;
@@ -197,10 +197,10 @@ export default function Dashboard() {
     const newSpecialInfo = { ...specialMealsInfo };
     // Create base options list without duplicates
     const baseOptions = [
-      { name: "Chicken", factor: 1.3 },
+      { name: "Chicken", factor: 1.5 },
       { name: "Mutton", factor: 2.5 },
-      { name: "Fish", factor: 1.3 },
-      { name: "Paneer", factor: 1.3 }
+      { name: "Fish", factor: 1.5 },
+      { name: "Paneer", factor: 1.5 }
     ];
     
     // Add custom option if it's not in the base list
@@ -267,11 +267,11 @@ export default function Dashboard() {
                 onChange={(e) => setSpecialSelection(e.target.value)}
                 style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.2)' }}
               >
-                <option value="Chicken">Chicken (Factor: 1.3)</option>
-                <option value="Mutton">Mutton (Factor: 2.5)</option>
-                <option value="Fish">Fish (Factor: 1.3)</option>
-                <option value="Paneer">Paneer (Factor: 1.3)</option>
-                <option value="Others">Others (Custom Factor)</option>
+                <option value="Chicken">Chicken</option>
+                <option value="Mutton">Mutton</option>
+                <option value="Fish">Fish</option>
+                <option value="Paneer">Paneer</option>
+                <option value="Others">Others (Custom)</option>
               </select>
             </div>
 
@@ -444,7 +444,7 @@ export default function Dashboard() {
                             >
                               <option value="">Standard Option</option>
                               {specialMealsInfo[meal].options?.map(opt => (
-                                <option key={opt.name} value={opt.name}>{opt.name} ({opt.factor}x)</option>
+                                <option key={opt.name} value={opt.name}>{opt.name}</option>
                               ))}
                             </select>
                           )}

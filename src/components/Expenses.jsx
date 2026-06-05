@@ -101,16 +101,24 @@ export default function Expenses() {
       // Fetch users
       const usersSnap = await getDocs(collection(db, 'users'));
       const allUsers = [];
-      const allMembers = [];
       const usersMap = {};
       usersSnap.forEach(doc => {
         const u = { id: doc.id, ...doc.data() };
         usersMap[u.uid] = u.name;
         allUsers.push(u);
-        allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid, defaultMeals: u.defaultMeals || [] });
         if (u.guests) {
           u.guests.forEach(g => {
             usersMap[`${u.uid}_${g.id}`] = `${g.name} (Guest)`;
+          });
+        }
+      });
+      allUsers.sort((a, b) => (a.displayOrder ?? 999) - (b.displayOrder ?? 999));
+
+      const allMembers = [];
+      allUsers.forEach(u => {
+        allMembers.push({ type: 'permanent', id: u.uid, name: u.name, parentId: u.uid, defaultMeals: u.defaultMeals || [] });
+        if (u.guests) {
+          u.guests.forEach(g => {
             allMembers.push({ type: 'guest', id: `${u.uid}_${g.id}`, name: `${g.name} (Guest)`, parentId: u.uid, startDate: g.startDate, endDate: g.endDate, preferredMeals: g.preferredMeals || [] });
           });
         }
@@ -167,20 +175,55 @@ export default function Expenses() {
       const { saveAs } = await import('file-saver');
       
       const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Attendance Report', { views: [{ state: 'frozen', xSplit: 1, ySplit: 2 }] });
+      
+      // --- CONFIGURATIONS SHEET ---
+      const wsConfig = wb.addWorksheet('Configurations');
+      wsConfig.columns = [
+        { header: 'Configuration', key: 'name', width: 25 },
+        { header: 'Factor', key: 'factor', width: 15 }
+      ];
+      
+      const configItems = [
+         { name: "Guest Multiplier", factor: 1.3 },
+         { name: "Breakfast", factor: 0.5 },
+         { name: "Standard Meal", factor: 1.0 },
+         { name: "Chicken", factor: 1.5 },
+         { name: "Mutton", factor: 2.5 },
+         { name: "Fish", factor: 1.5 },
+         { name: "Paneer", factor: 1.5 }
+      ];
+      
+      const configMap = new Map();
+      
+      // Find all custom special items
+      Object.values(specialMealsData).forEach(spDay => {
+         Object.values(spDay).forEach(spMeal => {
+            if (spMeal.isSpecial && spMeal.options) {
+                spMeal.options.forEach(opt => {
+                    if (!configItems.find(x => x.name === opt.name)) {
+                        configItems.push({ name: opt.name, factor: opt.factor });
+                    }
+                });
+            }
+         });
+      });
+      
+      configItems.forEach((item, idx) => {
+         wsConfig.addRow(item);
+         configMap.set(item.name, `Configurations!$B$${idx + 2}`);
+      });
+      
+      wsConfig.getRow(1).font = { bold: true };
+      
+      // --- ATTENDANCE SHEET ---
+      const ws = wb.addWorksheet('Attendance Report', { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
       ws.properties.defaultRowHeight = 25;
 
-      const row1 = [''];
-      const row2 = ['Date'];
+      const row1 = ['Member Name', 'Type'];
+      const row2 = ['Member Name', 'Type'];
       
       const mealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Others'];
       const mealInitials = ['B', 'L', 'D', 'O'];
-
-      // Build Headers
-      allMembers.forEach(member => {
-        row1.push(member.name, '', '', '');
-        row2.push(...mealInitials);
-      });
 
       const colLetter = (col) => {
         let letter = '';
@@ -192,10 +235,21 @@ export default function Expenses() {
         return letter;
       };
 
-      // Daily Analytics Columns
-      const dailyAnalyticsCols = ['Count (B)', 'Count (L)', 'Count (D)', 'Count (O)', 'Total Weighted Units'];
-      row1.push('DAILY TOTALS', ...Array(dailyAnalyticsCols.length - 1).fill(''));
-      row2.push(...dailyAnalyticsCols);
+      // Build Date Headers
+      monthDates.forEach(date => {
+        const spDay = specialMealsData[date];
+        let hasSpecial = false;
+        if (spDay) {
+          Object.values(spDay).forEach(info => { if(info.isSpecial) hasSpecial = true; });
+        }
+        row1.push(hasSpecial ? `${date} 🌟` : date, '', '', '');
+        row2.push(...mealInitials);
+      });
+
+      // Monthly Totals Headers
+      const monthlyTotalCols = ['Total B', 'Total L', 'Total D', 'Total O', 'Final Cost Units'];
+      row1.push('MONTHLY TOTALS', ...Array(monthlyTotalCols.length - 1).fill(''));
+      row2.push(...monthlyTotalCols);
 
       const headerRow1 = ws.addRow(row1);
       const headerRow2 = ws.addRow(row2);
@@ -203,54 +257,61 @@ export default function Expenses() {
       headerRow1.height = 30;
       headerRow2.height = 30;
 
-      // Merge & Style User Headers
-      let colIdx = 2;
-      allMembers.forEach(member => {
+      // Merge Date Headers
+      let colIdx = 3;
+      monthDates.forEach(() => {
         ws.mergeCells(1, colIdx, 1, colIdx + 3);
         const cell = ws.getCell(1, colIdx);
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: member.type === 'guest' ? 'FFFFE699' : 'FFD9E1F2' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         colIdx += 4;
       });
 
-      // Merge Daily Totals Header
-      ws.mergeCells(1, colIdx, 1, colIdx + dailyAnalyticsCols.length - 1);
+      // Merge Monthly Totals Header
+      ws.mergeCells(1, colIdx, 1, colIdx + monthlyTotalCols.length - 1);
       ws.getCell(1, colIdx).alignment = { horizontal: 'center', vertical: 'middle' };
       ws.getCell(1, colIdx).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
       ws.getCell(1, colIdx).font = { bold: true };
       
-      ws.getCell('A2').alignment = { vertical: 'middle', horizontal: 'center' };
-      ws.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
-      ws.getCell('A2').border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+      ws.mergeCells('A1:A2');
+      ws.mergeCells('B1:B2');
+      ws.getCell('A1').value = 'Member Name';
+      ws.getCell('B1').value = 'Type';
+      
+      [ws.getCell('A1'), ws.getCell('B1')].forEach(c => {
+         c.alignment = { vertical: 'middle', horizontal: 'center' };
+         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+         c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+         c.font = { bold: true };
+      });
 
       // Style Sub-headers (Row 2)
       row2.forEach((val, i) => {
-        if (!val) return;
+        if (!val || i < 2) return;
         const cell = ws.getCell(2, i + 1);
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
         
-        if (i > 0 && i <= allMembers.length * 4) {
-           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
-        } else if (i > allMembers.length * 4) {
+        if (i >= 2 && i < 2 + monthDates.length * 4) {
+           const mod = (i - 2) % 4;
+           if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Breakfast: Light Yellow
+           else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } }; // Lunch: Light Orange
+           else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }; // Dinner: Light Blue
+           else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }; // Others: Gray
+        } else {
            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
         }
       });
 
-      // Add Data Rows (Dates)
-      monthDates.forEach((date, dateIdx) => {
-        const rowData = [];
-        const r = dateIdx + 3; // Excel row index
+      // Add Data Rows (Members)
+      const lastColStr = colLetter(2 + monthDates.length * 4);
+      let r = 3;
+      
+      allMembers.forEach((member, mIdx) => {
+        const rowData = [member.name, member.type === 'permanent' ? 'Permanent' : 'Guest'];
         
-        const spDay = specialMealsData[date];
-        let hasSpecial = false;
-        if (spDay) {
-          Object.values(spDay).forEach(info => { if(info.isSpecial) hasSpecial = true; });
-        }
-        rowData.push(hasSpecial ? `${date} 🌟` : date);
-
-        allMembers.forEach(member => {
+        monthDates.forEach((date, dateIdx) => {
           let dayMeals;
           if (logsMatrix[member.id] && logsMatrix[member.id][date] !== undefined) {
             dayMeals = logsMatrix[member.id][date];
@@ -277,151 +338,85 @@ export default function Expenses() {
           });
         });
 
-        const counts = { B: [], L: [], D: [], O: [] };
-        const unitTerms = [];
-
-        allMembers.forEach((member, mIdx) => {
-          mealTypes.forEach((meal, mealIdx) => {
-             const colName = colLetter(2 + mIdx*4 + mealIdx);
-             if (mealIdx === 0) counts.B.push(`IF(${colName}${r}="-", 0, 1)`);
-             if (mealIdx === 1) counts.L.push(`IF(${colName}${r}="-", 0, 1)`);
-             if (mealIdx === 2) counts.D.push(`IF(${colName}${r}="-", 0, 1)`);
-             if (mealIdx === 3) counts.O.push(`IF(${colName}${r}="-", 0, 1)`);
-
-             const spDayMeal = specialMealsData[date]?.[meal];
-             let factorFormula = `IF(${colName}${r}="-", 0, 1.0)`;
-             if (meal === 'Breakfast') {
-               factorFormula = `IF(${colName}${r}="-", 0, 0.5)`;
-             } else if (spDayMeal?.isSpecial) {
-               let nested = `IF(${colName}${r}="-", 0, IF(${colName}${r}="✓", 1.0, `;
-               const options = spDayMeal.options || [];
-               options.forEach(opt => {
-                  nested += `IF(${colName}${r}="${opt.name}", ${opt.factor}, `;
-               });
-               nested += `0`; // fallback
-               nested += ')'.repeat(options.length + 2);
-               factorFormula = nested;
-             }
-             if (member.type === 'guest') factorFormula = `(${factorFormula})*1.3`;
-             unitTerms.push(factorFormula);
-          });
+        // Add Formulas
+        const bCount = `COUNTIFS($C$2:$${lastColStr}$2, "B", C${r}:${lastColStr}${r}, "<>-")`;
+        const lCount = `COUNTIFS($C$2:$${lastColStr}$2, "L", C${r}:${lastColStr}${r}, "<>-")`;
+        const dCount = `COUNTIFS($C$2:$${lastColStr}$2, "D", C${r}:${lastColStr}${r}, "<>-")`;
+        const oCount = `COUNTIFS($C$2:$${lastColStr}$2, "O", C${r}:${lastColStr}${r}, "<>-")`;
+        
+        // Final Cost Formula
+        let costFormula = `${bCount} * ${configMap.get("Breakfast")}`;
+        costFormula += ` + COUNTIFS($C$2:$${lastColStr}$2, "L", C${r}:${lastColStr}${r}, "✓") * ${configMap.get("Standard Meal")}`;
+        costFormula += ` + COUNTIFS($C$2:$${lastColStr}$2, "D", C${r}:${lastColStr}${r}, "✓") * ${configMap.get("Standard Meal")}`;
+        costFormula += ` + COUNTIFS($C$2:$${lastColStr}$2, "O", C${r}:${lastColStr}${r}, "✓") * ${configMap.get("Standard Meal")}`;
+        
+        // Add special items
+        configItems.forEach(item => {
+           if (!["Guest Multiplier", "Breakfast", "Standard Meal"].includes(item.name)) {
+              // Note: Only count if it exactly matches the special item name
+              costFormula += ` + COUNTIFS(C${r}:${lastColStr}${r}, "${item.name}") * ${configMap.get(item.name)}`;
+           }
         });
+        
+        let finalCostFormula = `IF($B${r}="Guest", (${costFormula}) * ${configMap.get("Guest Multiplier")}, ${costFormula})`;
 
         rowData.push(
-          { formula: counts.B.join('+') || '0' },
-          { formula: counts.L.join('+') || '0' },
-          { formula: counts.D.join('+') || '0' },
-          { formula: counts.O.join('+') || '0' },
-          { formula: unitTerms.join('+') || '0' }
+          { formula: bCount },
+          { formula: lCount },
+          { formula: dCount },
+          { formula: oCount },
+          { formula: finalCostFormula }
         );
+        
         const rowObj = ws.addRow(rowData);
-
+        
+        // Style Data Row
         rowObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
           cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
-          if (colNumber === 1) {
+          if (colNumber === 1 || colNumber === 2) {
              cell.alignment = { horizontal: 'left', vertical: 'middle' };
-             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: hasSpecial ? 'FFFFD700' : 'FFF2F2F2' } };
-          } else if (colNumber > 1 && colNumber <= 1 + allMembers.length * 4) {
-             const mealIdx = (colNumber - 2) % 4;
-             const isSpecial = specialMealsData[date]?.[mealTypes[mealIdx]]?.isSpecial;
-             if (isSpecial) {
-                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+             if (member.type === 'guest') {
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
              }
-             if (cell.value) {
-                 cell.font = { color: { argb: isSpecial ? 'FFC00000' : 'FF00B050' }, bold: true };
+          } else if (colNumber > 2 && colNumber <= 2 + monthDates.length * 4) {
+             const mod = (colNumber - 3) % 4;
+             if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+             else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
+             else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
+             else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+             
+             if (cell.value && cell.value !== '-' && cell.value !== '✓') {
+                 cell.font = { color: { argb: 'FFC00000' }, bold: true };
+             } else if (cell.value === '✓') {
+                 cell.font = { color: { argb: 'FF00B050' }, bold: true };
              }
-          } else if (colNumber > 1 + allMembers.length * 4) {
+          } else if (colNumber > 2 + monthDates.length * 4) {
              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+             cell.font = { bold: true };
           }
         });
-      });
-
-      // Bottom User Analytics Rows
-      const bottomLabels = [
-        { label: 'Total Count (B)', mIdxOffset: 0 },
-        { label: 'Total Count (L)', mIdxOffset: 1 },
-        { label: 'Total Count (D)', mIdxOffset: 2 },
-        { label: 'Total Count (O)', mIdxOffset: 3 },
-        { label: 'TOTAL UNITS', isUnits: true }
-      ];
-
-      const rOffset = monthDates.length + 2; // last data row index
-      const totalUnitsRowIdx = rOffset + 5; // TOTAL UNITS row will be the 5th bottom row
-
-      bottomLabels.forEach((info) => {
-        const bRow = [info.label];
-        allMembers.forEach((member, mIdx) => {
-           if (info.isUnits) {
-              const terms = [];
-              for (let d = 0; d < monthDates.length; d++) {
-                 const r = d + 3;
-                 for (let mealIdx=0; mealIdx<4; mealIdx++) {
-                     const meal = mealTypes[mealIdx];
-                     const colName = colLetter(2 + mIdx*4 + mealIdx);
-                     const spDayMeal = specialMealsData[monthDates[d]]?.[meal];
-                     let factorFormula = `IF(${colName}${r}="-", 0, 1.0)`;
-                     if (meal === 'Breakfast') {
-                        factorFormula = `IF(${colName}${r}="-", 0, 0.5)`;
-                     } else if (spDayMeal?.isSpecial) {
-                        let nested = `IF(${colName}${r}="-", 0, IF(${colName}${r}="✓", 1.0, `;
-                        const options = spDayMeal.options || [];
-                        options.forEach(opt => {
-                           nested += `IF(${colName}${r}="${opt.name}", ${opt.factor}, `;
-                        });
-                        nested += `0`; // fallback
-                        nested += ')'.repeat(options.length + 2);
-                        factorFormula = nested;
-                     }
-                     if (member.type === 'guest') factorFormula = `(${factorFormula})*1.3`;
-                     terms.push(factorFormula);
-                 }
-              }
-              bRow.push({ formula: terms.join('+') || '0' }, '', '', '');
-           } else {
-              const colName = colLetter(2 + mIdx*4 + info.mIdxOffset);
-              bRow.push({ formula: `COUNTIF(${colName}3:${colName}${rOffset}, "<>-")` }, '', '', '');
-           }
-        });
         
-        // Grand totals for daily count columns
-        if (info.isUnits) {
-           const sumCol = colLetter(2 + allMembers.length*4 + 4); 
-           bRow.push('', '', '', '', { formula: `SUM(${sumCol}3:${sumCol}${rOffset})` });
-        } else {
-           const sumCol = colLetter(2 + allMembers.length*4 + info.mIdxOffset);
-           const arr = ['', '', '', '', ''];
-           arr[info.mIdxOffset] = { formula: `SUM(${sumCol}3:${sumCol}${rOffset})` };
-           bRow.push(...arr);
+        r++;
+        
+        // If this member is the last of a group (i.e. next member is a permanent), insert blank row
+        const nextMember = allMembers[mIdx + 1];
+        if (!nextMember || nextMember.type === 'permanent') {
+            const blankRow = ws.addRow([]);
+            blankRow.height = 10;
+            // Optionally add borders or styling to blank row if needed, but leaving blank is fine.
+            r++;
         }
-
-        const rObj = ws.addRow(bRow);
-        rObj.height = 25;
-        
-        let cIdx = 2;
-        allMembers.forEach(() => {
-           ws.mergeCells(rObj.number, cIdx, rObj.number, cIdx + 3);
-           cIdx += 4;
-        });
-
-        rObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-           if (colNumber === 1 || colNumber <= 1 + allMembers.length * 4) {
-             cell.font = { bold: true };
-             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
-             cell.alignment = { horizontal: 'center', vertical: 'middle' };
-             cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-           }
-        });
-        ws.getCell(rObj.number, 1).alignment = { horizontal: 'left', vertical: 'middle' };
       });
 
       // Narrow Columns
-      ws.getColumn(1).width = 18;
-      for (let i = 2; i <= 1 + allMembers.length * 4; i++) {
+      ws.getColumn(1).width = 22;
+      ws.getColumn(2).width = 12;
+      for (let i = 3; i <= 2 + monthDates.length * 4; i++) {
         ws.getColumn(i).width = 6;
       }
-      for (let i = 2 + allMembers.length * 4; i <= 1 + allMembers.length * 4 + dailyAnalyticsCols.length; i++) {
+      for (let i = 3 + monthDates.length * 4; i <= 2 + monthDates.length * 4 + monthlyTotalCols.length; i++) {
         ws.getColumn(i).width = 16;
       }
 
