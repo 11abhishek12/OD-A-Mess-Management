@@ -415,7 +415,7 @@ export default function Expenses() {
       monthDates.forEach((date, dateIdx) => {
          for(let mealIdx = 0; mealIdx < 4; mealIdx++) {
             const colName = colLetter(3 + dateIdx * 4 + mealIdx);
-            dailyTotalsRow.push({ formula: `COUNTIF(${colName}3:${colName}${r - 1}, "<>-")` });
+            dailyTotalsRow.push({ formula: `COUNTIFS(${colName}3:${colName}${r - 1}, "<>-", ${colName}3:${colName}${r - 1}, "<>")` });
          }
       });
       // Push empty cells for the Monthly totals columns to align borders properly
