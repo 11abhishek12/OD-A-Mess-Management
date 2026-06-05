@@ -176,13 +176,12 @@ export default function Expenses() {
       
       const wb = new ExcelJS.Workbook();
       
-      // --- CONFIGURATIONS SHEET ---
+      // Order of worksheets dictates tab order
+      const ws = wb.addWorksheet('Attendance Report', { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
+      const wsExp = wb.addWorksheet('Expenses & Billing', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
       const wsConfig = wb.addWorksheet('Configurations');
-      wsConfig.columns = [
-        { header: 'Configuration', key: 'name', width: 25 },
-        { header: 'Factor', key: 'factor', width: 15 }
-      ];
-      
+
+      // --- CONFIGURATIONS DATA BUILD ---
       const configItems = [
          { name: "Guest Multiplier", factor: 1.3 },
          { name: "Breakfast", factor: 0.5 },
@@ -209,14 +208,10 @@ export default function Expenses() {
       });
       
       configItems.forEach((item, idx) => {
-         wsConfig.addRow(item);
          configMap.set(item.name, `Configurations!$B$${idx + 2}`);
       });
       
-      wsConfig.getRow(1).font = { bold: true };
-      
       // --- ATTENDANCE SHEET ---
-      const ws = wb.addWorksheet('Attendance Report', { views: [{ state: 'frozen', xSplit: 2, ySplit: 2 }] });
       ws.properties.defaultRowHeight = 25;
 
       const row1 = ['Member Name', 'Type'];
@@ -286,7 +281,13 @@ export default function Expenses() {
          c.font = { bold: true };
       });
 
-      // Style Sub-headers (Row 2)
+      // Style Sub-headers (Row 2) - New Cooler Pastel Colors
+      const colorBreakfast = 'FFFFF7D9'; // Very soft yellow
+      const colorLunch = 'FFFFEBE0';     // Very soft orange/peach
+      const colorDinner = 'FFE8F1FA';    // Very soft blue
+      const colorOthers = 'FFF8F9FA';    // Very light gray
+      const colorGuest = 'FFFDF5E6';     // Even lighter, subtle cream
+
       row2.forEach((val, i) => {
         if (!val || i < 2) return;
         const cell = ws.getCell(2, i + 1);
@@ -295,10 +296,10 @@ export default function Expenses() {
         
         if (i >= 2 && i < 2 + monthDates.length * 4) {
            const mod = (i - 2) % 4;
-           if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Breakfast: Light Yellow
-           else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } }; // Lunch: Light Orange
-           else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } }; // Dinner: Light Blue
-           else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } }; // Others: Gray
+           if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorBreakfast } };
+           else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorLunch } };
+           else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorDinner } };
+           else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorOthers } };
         } else {
            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
         }
@@ -378,14 +379,14 @@ export default function Expenses() {
           if (colNumber === 1 || colNumber === 2) {
              cell.alignment = { horizontal: 'left', vertical: 'middle' };
              if (member.type === 'guest') {
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorGuest } };
              }
           } else if (colNumber > 2 && colNumber <= 2 + monthDates.length * 4) {
              const mod = (colNumber - 3) % 4;
-             if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-             else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4D6' } };
-             else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
-             else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+             if (mod === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorBreakfast } };
+             else if (mod === 1) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorLunch } };
+             else if (mod === 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorDinner } };
+             else cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorOthers } };
              
              if (cell.value && cell.value !== '-' && cell.value !== '✓') {
                  cell.font = { color: { argb: 'FFC00000' }, bold: true };
@@ -405,11 +406,44 @@ export default function Expenses() {
         if (!nextMember || nextMember.type === 'permanent') {
             const blankRow = ws.addRow([]);
             blankRow.height = 10;
-            // Optionally add borders or styling to blank row if needed, but leaving blank is fine.
             r++;
         }
       });
 
+      // Add Daily Totals Row at the bottom
+      const dailyTotalsRow = ['DAILY TOTALS', ''];
+      monthDates.forEach((date, dateIdx) => {
+         for(let mealIdx = 0; mealIdx < 4; mealIdx++) {
+            const colName = colLetter(3 + dateIdx * 4 + mealIdx);
+            dailyTotalsRow.push({ formula: `COUNTIF(${colName}3:${colName}${r - 1}, "<>-")` });
+         }
+      });
+      // Push empty cells for the Monthly totals columns to align borders properly
+      dailyTotalsRow.push(...Array(monthlyTotalCols.length).fill(''));
+      
+      const tRowObj = ws.addRow(dailyTotalsRow);
+      tRowObj.height = 25;
+      ws.mergeCells(`A${r}:B${r}`);
+      
+      tRowObj.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+         cell.font = { bold: true };
+         cell.alignment = { horizontal: 'center', vertical: 'middle' };
+         cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+         
+         if (colNumber === 1 || colNumber === 2) {
+             cell.alignment = { horizontal: 'left', vertical: 'middle' };
+             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+         } else if (colNumber > 2 && colNumber <= 2 + monthDates.length * 4) {
+             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+         } else {
+             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+         }
+      });
+      
+      // Calculate final units sum for Base Cost calculation
+      const finalCostCol = colLetter(2 + monthDates.length * 4 + 5);
+      const totalUnitsSumFormula = `SUM('Attendance Report'!${finalCostCol}3:${finalCostCol}${r - 1})`;
+      
       // Narrow Columns
       ws.getColumn(1).width = 22;
       ws.getColumn(2).width = 12;
@@ -420,8 +454,7 @@ export default function Expenses() {
         ws.getColumn(i).width = 16;
       }
 
-      // Add Expenses Sheet
-      const wsExp = wb.addWorksheet('Expenses & Billing', { views: [{ state: 'frozen', xSplit: 0, ySplit: 1 }] });
+      // --- EXPENSES & BILLING SHEET ---
       wsExp.properties.defaultRowHeight = 25;
       wsExp.columns = [
         { header: 'Date', key: 'Date', width: 15 },
@@ -481,7 +514,7 @@ export default function Expenses() {
       wsExp.getCell(totalExpCell).font = { bold: true };
       wsExp.getCell(totalExpCell).numFmt = '₹#,##0.00';
 
-      // Re-calculate Attendance Row Map
+      // Re-calculate Attendance Row Map for mapping users to units
       let currentAttendanceRow = 3;
       const memberRows = {};
       allMembers.forEach((m, i) => {
@@ -494,9 +527,8 @@ export default function Expenses() {
       });
 
       // Base Rate Formula
-      const finalCostCol = colLetter(2 + monthDates.length * 4 + 5);
       wsExp.getCell(`N1`).value = 'Base Cost Rate:';
-      wsExp.getCell(`O1`).value = { formula: `${totalExpCell} / SUM('Attendance Report'!${finalCostCol}3:${finalCostCol}${currentAttendanceRow})` };
+      wsExp.getCell(`O1`).value = { formula: `${totalExpCell} / ${totalUnitsSumFormula}` };
       wsExp.getCell(`O1`).numFmt = '₹#,##0.00';
       
       let rIdx = 3;
@@ -528,8 +560,6 @@ export default function Expenses() {
          wsExp.getCell(`K${rIdx}`).numFmt = '₹#,##0.00';
          wsExp.getCell(`L${rIdx}`).numFmt = '₹#,##0.00';
          
-         // Conditional formatting is best done natively in Excel, but we'll apply a default static style here
-         // For a fully dynamic color change, we'd add conditional formatting rules via exceljs
          wsExp.addConditionalFormatting({
            ref: `L${rIdx}:L${rIdx}`,
            rules: [
@@ -561,6 +591,17 @@ export default function Expenses() {
       }
       wsExp.getCell(`N1`).font = { bold: true };
       wsExp.getCell(`O1`).font = { bold: true };
+
+      // --- CONFIGURATIONS SHEET (Build Data) ---
+      wsConfig.columns = [
+        { header: 'Configuration', key: 'name', width: 25 },
+        { header: 'Factor', key: 'factor', width: 15 }
+      ];
+      
+      configItems.forEach(item => {
+         wsConfig.addRow(item);
+      });
+      wsConfig.getRow(1).font = { bold: true };
       
       const buffer = await wb.xlsx.writeBuffer();
       saveAs(new Blob([buffer]), `Mess_Report_${currentMonthPrefix}.xlsx`);
