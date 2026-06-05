@@ -481,26 +481,36 @@ export default function Expenses() {
       wsExp.getCell(totalExpCell).font = { bold: true };
       wsExp.getCell(totalExpCell).numFmt = '₹#,##0.00';
 
+      // Re-calculate Attendance Row Map
+      let currentAttendanceRow = 3;
+      const memberRows = {};
+      allMembers.forEach((m, i) => {
+         memberRows[m.id] = currentAttendanceRow;
+         currentAttendanceRow++;
+         const nxt = allMembers[i+1];
+         if (!nxt || nxt.type === 'permanent') {
+             currentAttendanceRow++;
+         }
+      });
+
       // Base Rate Formula
-      const grandTotalCol = colLetter(2 + allMembers.length*4 + 4);
+      const finalCostCol = colLetter(2 + monthDates.length * 4 + 5);
       wsExp.getCell(`N1`).value = 'Base Cost Rate:';
-      wsExp.getCell(`O1`).value = { formula: `${totalExpCell} / 'Attendance Report'!${grandTotalCol}${totalUnitsRowIdx}` };
+      wsExp.getCell(`O1`).value = { formula: `${totalExpCell} / SUM('Attendance Report'!${finalCostCol}3:${finalCostCol}${currentAttendanceRow})` };
       wsExp.getCell(`O1`).numFmt = '₹#,##0.00';
       
       let rIdx = 3;
       allUsers.forEach(user => {
-         const memberIdx = allMembers.findIndex(m => m.id === user.uid);
-         const selfUnitsCol = colLetter(2 + memberIdx*4);
+         const memberRow = memberRows[user.uid];
 
          wsExp.getCell(`G${rIdx}`).value = user.name;
-         wsExp.getCell(`H${rIdx}`).value = { formula: `'Attendance Report'!${selfUnitsCol}${totalUnitsRowIdx}` };
+         wsExp.getCell(`H${rIdx}`).value = { formula: `'Attendance Report'!${finalCostCol}${memberRow}` };
          
          if (user.guests && user.guests.length > 0) {
             let guestFormula = '';
             user.guests.forEach(g => {
-               const gIdx = allMembers.findIndex(m => m.id === `${user.uid}_${g.id}`);
-               const gCol = colLetter(2 + gIdx*4);
-               guestFormula += `'Attendance Report'!${gCol}${totalUnitsRowIdx}+`;
+               const gRow = memberRows[`${user.uid}_${g.id}`];
+               guestFormula += `'Attendance Report'!${finalCostCol}${gRow}+`;
             });
             guestFormula = guestFormula.slice(0, -1);
             wsExp.getCell(`I${rIdx}`).value = { formula: guestFormula || '0' };
